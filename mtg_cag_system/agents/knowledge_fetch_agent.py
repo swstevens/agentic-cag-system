@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import os
 from pydantic_ai import Agent
 from .base_agent import BaseAgent
@@ -35,18 +35,35 @@ class KnowledgeFetchAgent(BaseAgent):
         filters = input_data.get("filters", {})
 
         try:
-            # Get cards from knowledge service (CAG approach - preloaded)
-            relevant_cards = self.knowledge_service.search_cards(query, filters)
+            # Step 1: Use LLM to extract card names from the query
+            card_names = await self._extract_card_names(query)
+
+            # Step 2: Search for extracted cards in knowledge base
+            relevant_cards = []
+            for card_name in card_names:
+                card = self.knowledge_service.get_card_by_name(card_name)
+                if card:
+                    relevant_cards.append(card)
+                else:
+                    # Fallback: fuzzy search using LLM-powered matching
+                    fuzzy_cards = self.knowledge_service.search_cards(card_name, filters)
+                    relevant_cards.extend(fuzzy_cards)
 
             # Get full context
             context = self.knowledge_service.get_context_for_query(query)
 
-            # Use Pydantic AI agent to interpret and respond
+            # Step 3: Use Pydantic AI agent to interpret and respond
+            cards_info = "\n".join([
+                f"- {c.name}: {c.oracle_text or 'N/A'}"
+                for c in relevant_cards[:5]
+            ]) if relevant_cards else "No exact matches found in database."
+
             result = await self._pydantic_agent.run(
                 f"Query: {query}\n\n"
                 f"Preloaded Context Available: {len(context)} characters\n"
-                f"Found {len(relevant_cards)} relevant cards\n\n"
-                f"Provide a helpful response based on the preloaded card knowledge."
+                f"Extracted card names: {', '.join(card_names) if card_names else 'None'}\n"
+                f"Found {len(relevant_cards)} relevant cards:\n{cards_info}\n\n"
+                f"Provide a helpful response based on the preloaded card knowledge and your MTG expertise."
             )
 
             self.update_state("completed")
@@ -60,10 +77,15 @@ class KnowledgeFetchAgent(BaseAgent):
                 data={
                     "cards": [c.dict() for c in relevant_cards],
                     "answer": answer_text,
-                    "context_size": len(context)
+                    "context_size": len(context),
+                    "extracted_card_names": card_names
                 },
-                confidence=0.85,
-                reasoning_trace=[f"Found {len(relevant_cards)} cards", "Used CAG preloaded context"]
+                confidence=0.85 if relevant_cards else 0.7,
+                reasoning_trace=[
+                    f"Extracted {len(card_names)} card names from query",
+                    f"Found {len(relevant_cards)} cards",
+                    "Used CAG preloaded context"
+                ]
             )
 
         except Exception as e:
@@ -75,3 +97,70 @@ class KnowledgeFetchAgent(BaseAgent):
                 confidence=0.0,
                 error=str(e)
             )
+
+    async def _extract_card_names(self, query: str) -> List[str]:
+        """Use LLM to extract MTG card names from natural language query"""
+        extraction_prompt = f"""Extract all Magic: The Gathering card names from this query.
+Return ONLY a comma-separated list of card names, or "NONE" if no card names are mentioned.
+
+Examples:
+Query: "Tell me about Lightning Bolt"
+Card names: Lightning Bolt
+
+Query: "How do Lightning Bolt and Counterspell interact?"
+Card names: Lightning Bolt, Counterspell
+
+Query: "What's a good red aggro deck?"
+Card names: NONE
+
+Now extract from this query:
+Query: {query}
+
+Card names:"""
+
+        try:
+            result = await self._pydantic_agent.run(extraction_prompt)
+
+            # Extract the actual LLM response text
+            # pydantic-ai returns result.data which contains the actual string
+            if hasattr(result, 'data'):
+                response = result.data
+            else:
+                response = str(result)
+
+            # If response is still an object/wrapper, try to extract the string
+            response_str = str(response)
+
+            # Handle AgentRunResult wrapper format: "AgentRunResult(output='...')"
+            if "AgentRunResult(output=" in response_str:
+                import re
+                match = re.search(r"output='([^']*)'", response_str)
+                if match:
+                    response_str = match.group(1)
+                else:
+                    # Try with double quotes
+                    match = re.search(r'output="([^"]*)"', response_str)
+                    if match:
+                        response_str = match.group(1)
+
+            # Clean up the response - remove any wrapper text
+            response_str = response_str.strip()
+
+            # Remove common prefixes
+            for prefix in ["Card names:", "Cards:", "Answer:"]:
+                if response_str.startswith(prefix):
+                    response_str = response_str[len(prefix):].strip()
+
+            # Parse the response
+            if response_str.upper() == "NONE" or not response_str:
+                return []
+
+            # Split by comma and clean up
+            card_names = [name.strip() for name in response_str.split(',')]
+            card_names = [name for name in card_names if name and len(name) > 2]
+
+            return card_names
+        except Exception as e:
+            # Fallback: try basic keyword extraction
+            print(f"Card name extraction failed: {e}")
+            return []
