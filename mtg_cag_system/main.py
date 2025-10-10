@@ -7,11 +7,13 @@ from .config import settings
 from .models.card import MTGCard, CardCollection, CardColor, CardType
 from .services.cache_service import MultiTierCache
 from .services.knowledge_service import KnowledgeService
+from .services.database_service import DatabaseService
 from .agents.scheduling_agent import SchedulingAgent
 from .agents.knowledge_fetch_agent import KnowledgeFetchAgent
 from .agents.symbolic_reasoning_agent import SymbolicReasoningAgent
 from .controllers.orchestrator import AgentOrchestrator
 from .routers.api import router
+import os
 
 
 @asynccontextmanager
@@ -26,8 +28,22 @@ async def lifespan(app: FastAPI):
     cache.l2_max_size = settings.cache_l2_max_size
     cache.l3_max_size = settings.cache_l3_max_size
 
-    # Initialize knowledge service
-    knowledge_service = KnowledgeService(cache)
+    # Initialize database (SQLite)
+    db_path = "./data/cards.db"
+    db = None
+    if os.path.exists(db_path):
+        print(f"📀 Loading existing database: {db_path}")
+        db = DatabaseService(db_path)
+        db.connect()
+        card_count = db.card_count()
+        print(f"   Database contains {card_count:,} cards")
+    else:
+        print(f"⚠️  Database not found at {db_path}")
+        print(f"   Run 'python -m mtg_cag_system.scripts.build_database' to create it")
+        print(f"   System will work with limited card data (sample cards only)")
+
+    # Initialize knowledge service with database fallback
+    knowledge_service = KnowledgeService(cache, database_service=db)
 
     # Preload cards if configured
     if settings.preload_on_startup:
@@ -97,6 +113,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     print("👋 Shutting down MTG CAG System...")
+    if db:
+        db.disconnect()
 
 
 # Create FastAPI app

@@ -39,11 +39,16 @@ cp .env.example .env
 # Edit .env with your API keys
 ```
 
-4. (Optional) Download MTGJSON data:
+4. **(Recommended) Set up SQLite database with all MTG cards:**
 ```bash
-mkdir -p data/mtgjson
-# Download from https://mtgjson.com/
+# Download AllPrintings.json from https://mtgjson.com/
+# Place it in: data/mtgjson/AllPrintings.json
+
+# Build database (takes 2-5 minutes, one-time setup)
+python -m mtg_cag_system.scripts.build_database
 ```
+
+See [DATABASE_SETUP.md](DATABASE_SETUP.md) for detailed instructions.
 
 5. Run the server:
 ```bash

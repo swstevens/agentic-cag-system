@@ -1,13 +1,15 @@
 from typing import List, Optional, Dict, Any
 from ..models.card import MTGCard, CardCollection
 from .cache_service import MultiTierCache
+from .database_service import DatabaseService
 
 
 class KnowledgeService:
     """Service for managing CAG knowledge base"""
 
-    def __init__(self, cache_service: MultiTierCache):
+    def __init__(self, cache_service: MultiTierCache, database_service: Optional[DatabaseService] = None):
         self.cache = cache_service
+        self.db = database_service
         self.knowledge_base: Optional[CardCollection] = None
         self.preloaded_context: Optional[str] = None
         self.kv_cache_ready = False
@@ -44,11 +46,31 @@ class KnowledgeService:
         print(f"Context size: {len(self.preloaded_context)} characters")
 
     def get_card_by_name(self, name: str) -> Optional[MTGCard]:
-        """Retrieve card from cache"""
+        """
+        Retrieve card from cache, with database fallback
+
+        Flow:
+        1. Check L1/L2/L3 cache tiers
+        2. If cache miss, query SQLite database
+        3. Cache the result in L3 for future lookups
+        4. Return card or None
+        """
+        # Try cache first (L1/L2/L3)
         cache_key = f"card:{name.lower()}"
         card_data = self.cache.get(cache_key)
         if card_data:
             return MTGCard(**card_data)
+
+        # Cache miss - fallback to database
+        if self.db:
+            card = self.db.get_card_by_name(name)
+            if card:
+                # Cache in L3 for future lookups
+                self.cache.set(cache_key, card.dict(), tier=3, ttl=None)
+                print(f"📀 Database hit: {name} (cached to L3)")
+                return card
+
+        # Not found in cache or database
         return None
 
     def search_cards(self, query: str, filters: Optional[Dict[str, Any]] = None) -> List[MTGCard]:
