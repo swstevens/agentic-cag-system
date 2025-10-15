@@ -8,14 +8,19 @@ class KnowledgeService:
     """Service for managing CAG knowledge base"""
 
     def __init__(self, cache_service: MultiTierCache, database_service: Optional[DatabaseService] = None):
-        self.cache = cache_service
-        self.db = database_service
-        self.knowledge_base: Optional[CardCollection] = None
-        self.preloaded_context: Optional[str] = None
+        # Private: Internal dependencies (should not be accessed directly)
+        self.__cache = cache_service
+        self.__db = database_service
+
+        # Private: Internal state
+        self.__knowledge_base: Optional[CardCollection] = None
+        self.__preloaded_context: Optional[str] = None
+
+        # Public: Status flags (read-only via property recommended)
         self.kv_cache_ready = False
 
     async def load_cards_from_mtgjson(self, json_path: str, format_filter: Optional[str] = "Standard") -> CardCollection:
-        """Load MTG cards from MTGJSON file"""
+        """Load MTG cards from MTGJSON file (Public API)"""
         # In production, this would actually parse MTGJSON
         # For now, example structure
         cards = []  # Parse from JSON
@@ -26,28 +31,28 @@ class KnowledgeService:
             format_filter=format_filter
         )
 
-        self.knowledge_base = collection
+        self.__knowledge_base = collection
         return collection
 
     async def preload_knowledge(self, collection: CardCollection):
-        """Preload cards into CAG context"""
+        """Preload cards into CAG context (Public API)"""
         # Convert to context string for preloading
-        self.preloaded_context = collection.to_context_string()
+        self.__preloaded_context = collection.to_context_string()
 
         # Cache individual cards in L1 for fast lookup
         for card in collection.cards:
-            cache_key = f"card:{card.name.lower()}"
-            self.cache.set(cache_key, card.dict(), tier=1, ttl=None)
+            cache_key = self._make_cache_key(card.name)
+            self.__cache.set(cache_key, card.dict(), tier=1, ttl=None)
 
         # Mark KV cache as ready
         self.kv_cache_ready = True
 
         print(f"Preloaded {len(collection.cards)} cards into CAG context")
-        print(f"Context size: {len(self.preloaded_context)} characters")
+        print(f"Context size: {len(self.__preloaded_context)} characters")
 
     def get_card_by_name(self, name: str) -> Optional[MTGCard]:
         """
-        Retrieve card from cache, with database fallback
+        Retrieve card from cache, with database fallback (Public API)
 
         Flow:
         1. Check L1/L2/L3 cache tiers
@@ -56,17 +61,17 @@ class KnowledgeService:
         4. Return card or None
         """
         # Try cache first (L1/L2/L3)
-        cache_key = f"card:{name.lower()}"
-        card_data = self.cache.get(cache_key)
+        cache_key = self._make_cache_key(name)
+        card_data = self.__cache.get(cache_key)
         if card_data:
             return MTGCard(**card_data)
 
         # Cache miss - fallback to database
-        if self.db:
-            card = self.db.get_card_by_name(name)
+        if self.__db:
+            card = self.__db.get_card_by_name(name)
             if card:
                 # Cache in L3 for future lookups
-                self.cache.set(cache_key, card.dict(), tier=3, ttl=None)
+                self.__cache.set(cache_key, card.dict(), tier=3, ttl=None)
                 print(f"📀 Database hit: {name} (cached to L3)")
                 return card
 
@@ -74,14 +79,14 @@ class KnowledgeService:
         return None
 
     def search_cards(self, query: str, filters: Optional[Dict[str, Any]] = None) -> List[MTGCard]:
-        """Search for cards matching criteria"""
-        if not self.knowledge_base:
+        """Search for cards matching criteria (Public API)"""
+        if not self.__knowledge_base:
             return []
 
         results = []
         query_lower = query.lower()
 
-        for card in self.knowledge_base.cards:
+        for card in self.__knowledge_base.cards:
             # Simple text matching - in production would use more sophisticated search
             if (query_lower in card.name.lower() or
                 (card.oracle_text and query_lower in card.oracle_text.lower())):
@@ -98,7 +103,11 @@ class KnowledgeService:
         return results
 
     def get_context_for_query(self, query: str) -> str:
-        """Get relevant context for a query (CAG approach)"""
+        """Get relevant context for a query - CAG approach (Public API)"""
         # In CAG, we return the entire preloaded context
         # The LLM will use its attention mechanism to focus on relevant parts
-        return self.preloaded_context or ""
+        return self.__preloaded_context or ""
+
+    def _make_cache_key(self, card_name: str) -> str:
+        """Generate cache key from card name (Protected - internal helper)"""
+        return f"card:{card_name.lower()}"

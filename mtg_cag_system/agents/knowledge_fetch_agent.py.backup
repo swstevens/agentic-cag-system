@@ -4,96 +4,94 @@ from pydantic_ai import Agent
 from .base_agent import BaseAgent
 from ..models.agent import AgentType
 from ..models.response import AgentResponse
-from ..services.card_lookup_service import CardLookupService
-from ..models.card import MTGCard
+from ..services.knowledge_service import KnowledgeService
 
 
 class KnowledgeFetchAgent(BaseAgent):
-    """Agent for fetching card data from two-tier card lookup system"""
+    """Agent for fetching knowledge from CAG system"""
 
-    def __init__(self, card_lookup_service: CardLookupService, model_name: str = "openai:gpt-4", api_key: Optional[str] = None):
+    def __init__(self, knowledge_service: KnowledgeService, model_name: str = "openai:gpt-4", api_key: Optional[str] = None):
         super().__init__(AgentType.KNOWLEDGE_FETCH, model_name)
 
-        # Public: Card lookup service (users may need to access this)
-        self.card_lookup = card_lookup_service
+        # Public: Knowledge service (users may need to access this)
+        self.knowledge_service = knowledge_service
 
         # Set API key in environment if provided
         if api_key:
             os.environ['OPENAI_API_KEY'] = api_key
 
-        # Protected: Pydantic AI agent ONLY for card name extraction (used internally)
+        # Protected: Pydantic AI agent for interpreting card data (used internally)
         self._pydantic_agent = Agent(
             model_name,
-            system_prompt="""You are a card name extraction agent.
-            Extract Magic: The Gathering card names from user queries.
-            Be precise and only extract actual card names."""
+            system_prompt="""You are a knowledge retrieval agent for MTG cards.
+            You have access to preloaded card data in your context.
+            Extract and present relevant card information clearly and accurately.
+            Focus on card interactions, synergies, and deck-building advice."""
         )
 
     async def process(self, input_data: Dict[str, Any]) -> AgentResponse:
-        """
-        Fetch card data using two-tier lookup (Public API)
-        
-        Returns ONLY MTGCard schema data, no generated text.
-        """
-        self.update_state("processing", "Fetching cards")
+        """Fetch relevant knowledge from CAG"""
+        self.update_state("processing", "Fetching knowledge")
 
         query = input_data.get("query", "")
-        use_fuzzy = input_data.get("use_fuzzy", False)
+        filters = input_data.get("filters", {})
 
         try:
             # Step 1: Use LLM to extract card names from the query
             card_names = await self._extract_card_names(query)
-            print(f"[Knowledge Agent] Extracted card names: {card_names}")
 
-            # Step 2: Lookup cards using two-tier system
+            # Step 2: Search for extracted cards in knowledge base
             relevant_cards = []
-            lookup_trace = []
-
             for card_name in card_names:
-                # Try exact match first (CAG cache → Database)
-                card = self.card_lookup.get_card(card_name)
-
+                card = self.knowledge_service.get_card_by_name(card_name)
                 if card:
                     relevant_cards.append(card)
-                    lookup_trace.append(f"Found '{card_name}' via exact match")
-                elif use_fuzzy:
-                    # Fallback: fuzzy search
-                    fuzzy_results = self.card_lookup.fuzzy_search(card_name, limit=3)
-                    if fuzzy_results:
-                        relevant_cards.extend(fuzzy_results)
-                        lookup_trace.append(f"Found {len(fuzzy_results)} fuzzy matches for '{card_name}'")
-                    else:
-                        lookup_trace.append(f"No matches found for '{card_name}'")
                 else:
-                    lookup_trace.append(f"No exact match for '{card_name}'")
+                    # Fallback: fuzzy search using LLM-powered matching
+                    fuzzy_cards = self.knowledge_service.search_cards(card_name, filters)
+                    relevant_cards.extend(fuzzy_cards)
+
+            # Get full context
+            context = self.knowledge_service.get_context_for_query(query)
+
+            # Step 3: Use Pydantic AI agent to interpret and respond
+            cards_info = "\n".join([
+                f"- {c.name}: {c.oracle_text or 'N/A'}"
+                for c in relevant_cards[:5]
+            ]) if relevant_cards else "No exact matches found in database."
+
+            result = await self._pydantic_agent.run(
+                f"Query: {query}\n\n"
+                f"Preloaded Context Available: {len(context)} characters\n"
+                f"Extracted card names: {', '.join(card_names) if card_names else 'None'}\n"
+                f"Found {len(relevant_cards)} relevant cards:\n{cards_info}\n\n"
+                f"Provide a helpful response based on the preloaded card knowledge and your MTG expertise."
+            )
 
             self.update_state("completed")
 
-            # Get lookup statistics
-            lookup_stats = self.card_lookup.get_stats()
+            # Extract answer from result
+            answer_text = str(result.data) if hasattr(result, 'data') else str(result)
 
-            # Return ONLY the card data (MTGCard schema)
             return AgentResponse(
                 agent_type=self.agent_type.value,
                 success=True,
                 data={
                     "cards": [c.dict() for c in relevant_cards],
-                    "extracted_card_names": card_names,
-                    "lookup_stats": lookup_stats
+                    "answer": answer_text,
+                    "context_size": len(context),
+                    "extracted_card_names": card_names
                 },
-                confidence=1.0 if relevant_cards else 0.0,
-                reasoning_trace=lookup_trace + [
+                confidence=0.85 if relevant_cards else 0.7,
+                reasoning_trace=[
                     f"Extracted {len(card_names)} card names from query",
-                    f"Found {len(relevant_cards)} cards total",
-                    f"Tier 1 hits: {lookup_stats['tier1_hits']}",
-                    f"Tier 2 hits: {lookup_stats['tier2_hits']}"
+                    f"Found {len(relevant_cards)} cards",
+                    "Used CAG preloaded context"
                 ]
             )
 
         except Exception as e:
             self.update_state("error")
-            import traceback
-            traceback.print_exc()
             return AgentResponse(
                 agent_type=self.agent_type.value,
                 success=False,

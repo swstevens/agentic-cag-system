@@ -18,13 +18,16 @@ class AgentOrchestrator:
         symbolic_agent: SymbolicReasoningAgent,
         cache: MultiTierCache
     ):
+        # Public: Agent instances (users may need to access these)
         self.scheduling_agent = scheduling_agent
         self.knowledge_agent = knowledge_agent
         self.symbolic_agent = symbolic_agent
+
+        # Public: Cache service (users may need to access this)
         self.cache = cache
 
     async def process_query(self, query: UserQuery) -> FusedResponse:
-        """Process query through agent pipeline"""
+        """Process query through agent pipeline (Public API)"""
         reasoning_chain = ReasoningChain(query_id=query.query_id)
         agent_responses = {}
 
@@ -108,7 +111,7 @@ class AgentOrchestrator:
         agent_responses: Dict[str, AgentResponse],
         query: UserQuery
     ) -> Dict[str, Any]:
-        """Fuse responses from multiple agents"""
+        """Fuse responses from multiple agents (Protected - internal fusion logic)"""
         # Combine knowledge and validation results
         answer_parts = []
         sources = []

@@ -170,3 +170,4 @@ Thumbs.db
 # Project specific
 data/mtgjson/*.json
 mtg_cag_system/data/mtgjson/AllPrintings.json
+mtg_cag_system/data/cards.db

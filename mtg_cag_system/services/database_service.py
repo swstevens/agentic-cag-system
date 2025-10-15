@@ -9,27 +9,30 @@ class DatabaseService:
     """SQLite database service for MTG cards"""
 
     def __init__(self, db_path: str = "./data/cards.db"):
+        # Public: Database path (users may need to access this)
         self.db_path = db_path
-        self.conn: Optional[sqlite3.Connection] = None
+
+        # Private: Database connection (should not be accessed directly)
+        self.__conn: Optional[sqlite3.Connection] = None
 
     def connect(self):
-        """Connect to SQLite database"""
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row  # Enable column access by name
+        """Connect to SQLite database (Public API)"""
+        self.__conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.__conn.row_factory = sqlite3.Row  # Enable column access by name
         print(f"✅ Connected to database: {self.db_path}")
 
     def disconnect(self):
-        """Disconnect from database"""
-        if self.conn:
-            self.conn.close()
+        """Disconnect from database (Public API)"""
+        if self.__conn:
+            self.__conn.close()
             print("Disconnected from database")
 
     def initialize_schema(self):
-        """Create tables and indexes if they don't exist"""
-        if not self.conn:
+        """Create tables and indexes if they don't exist (Public API)"""
+        if not self.__conn:
             raise RuntimeError("Database not connected")
 
-        cursor = self.conn.cursor()
+        cursor = self.__conn.cursor()
 
         # Create cards table
         cursor.execute("""
@@ -71,35 +74,43 @@ class DatabaseService:
             )
         """)
 
-        self.conn.commit()
+        self.__conn.commit()
         print("✅ Database schema initialized")
 
     def card_count(self) -> int:
-        """Get total number of cards in database"""
-        if not self.conn:
+        """Get total number of cards in database (Public API)"""
+        if not self.__conn:
             return 0
 
-        cursor = self.conn.cursor()
+        cursor = self.__conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM cards")
         return cursor.fetchone()[0]
 
     def load_from_mtgjson(self, json_path: str, progress_callback=None):
         """
-        Load cards from MTGJSON AllPrintings.json file
+        Load cards from MTGJSON AllPrintings.json file (Public API)
 
         Args:
             json_path: Path to AllPrintings.json
             progress_callback: Optional function to call with progress updates
         """
-        if not self.conn:
+        if not self.__conn:
             raise RuntimeError("Database not connected")
 
         print(f"📚 Loading cards from {json_path}...")
 
         with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            json_data = json.load(f)
 
-        cursor = self.conn.cursor()
+        # Extract the 'data' portion (MTGJSON v5 format has meta and data)
+        if 'data' in json_data:
+            data = json_data['data']
+            print(f"   MTGJSON version: {json_data.get('meta', {}).get('version', 'unknown')}")
+        else:
+            # Fallback for older format
+            data = json_data
+
+        cursor = self.__conn.cursor()
         total_cards = 0
         inserted_cards = 0
 
@@ -165,19 +176,19 @@ class DatabaseService:
                     continue
 
         # Commit all inserts
-        self.conn.commit()
+        self.__conn.commit()
 
         # Rebuild FTS index
         print("🔄 Rebuilding full-text search index...")
         cursor.execute("INSERT INTO cards_fts(cards_fts) VALUES('rebuild')")
-        self.conn.commit()
+        self.__conn.commit()
 
         print(f"✅ Loaded {inserted_cards} cards from {len(data)} sets")
         return inserted_cards
 
     def get_card_by_name(self, name: str) -> Optional[MTGCard]:
         """
-        Get a card by exact name (case-insensitive)
+        Get a card by exact name (case-insensitive) (Public API)
 
         Args:
             name: Card name to search for
@@ -185,10 +196,10 @@ class DatabaseService:
         Returns:
             MTGCard object or None if not found
         """
-        if not self.conn:
+        if not self.__conn:
             return None
 
-        cursor = self.conn.cursor()
+        cursor = self.__conn.cursor()
         cursor.execute(
             "SELECT * FROM cards WHERE LOWER(name) = LOWER(?) LIMIT 1",
             (name,)
@@ -210,7 +221,7 @@ class DatabaseService:
         limit: int = 100
     ) -> List[MTGCard]:
         """
-        Search for cards with various filters
+        Search for cards with various filters (Public API)
 
         Args:
             query: Text to search in name/oracle text (uses FTS)
@@ -224,10 +235,10 @@ class DatabaseService:
         Returns:
             List of matching MTGCard objects
         """
-        if not self.conn:
+        if not self.__conn:
             return []
 
-        cursor = self.conn.cursor()
+        cursor = self.__conn.cursor()
 
         # Build SQL query dynamically based on filters
         if query:
@@ -274,7 +285,7 @@ class DatabaseService:
 
     def fuzzy_search(self, query: str, limit: int = 10) -> List[MTGCard]:
         """
-        Fuzzy search for cards by name using LIKE
+        Fuzzy search for cards by name using LIKE (Public API)
 
         Args:
             query: Search term
@@ -283,10 +294,10 @@ class DatabaseService:
         Returns:
             List of matching MTGCard objects
         """
-        if not self.conn:
+        if not self.__conn:
             return []
 
-        cursor = self.conn.cursor()
+        cursor = self.__conn.cursor()
 
         # Search with wildcards
         cursor.execute(
@@ -298,7 +309,7 @@ class DatabaseService:
         return [self._row_to_card(row) for row in rows]
 
     def _row_to_card(self, row: sqlite3.Row) -> MTGCard:
-        """Convert SQLite row to MTGCard object"""
+        """Convert SQLite row to MTGCard object (Protected - internal helper)"""
         # Parse JSON fields
         colors = json.loads(row['colors']) if row['colors'] else []
         color_identity = json.loads(row['color_identity']) if row['color_identity'] else []

@@ -66,7 +66,7 @@ class SymbolicReasoningAgent(BaseAgent):
             )
 
     async def _validate_deck(self, deck_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate deck legality using formal rules"""
+        """Validate deck legality using formal rules (Protected - internal logic)"""
         cards = deck_data.get("cards", [])
         format_name = deck_data.get("format", "Standard")
 
@@ -86,7 +86,7 @@ class SymbolicReasoningAgent(BaseAgent):
         }
 
     def _check_max_copies(self, cards: List[Dict]) -> bool:
-        """Check max 4 copies rule"""
+        """Check max 4 copies rule (Protected - internal validation)"""
         card_counts = {}
         for card in cards:
             name = card.get("name", "")
@@ -96,7 +96,7 @@ class SymbolicReasoningAgent(BaseAgent):
         return all(count <= 4 for count in card_counts.values())
 
     def _check_format_legality(self, cards: List[Dict], format_name: str) -> bool:
-        """Check if all cards are legal in format"""
+        """Check if all cards are legal in format (Protected - internal validation)"""
         for card in cards:
             legalities = card.get("legalities", {})
             if legalities.get(format_name, "not_legal") != "legal":
@@ -104,7 +104,7 @@ class SymbolicReasoningAgent(BaseAgent):
         return True
 
     async def _analyze_mana_curve(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze mana curve distribution"""
+        """Analyze mana curve distribution (Protected - internal analysis)"""
         cards = data.get("cards", [])
 
         curve = {i: 0 for i in range(8)}
@@ -125,7 +125,7 @@ class SymbolicReasoningAgent(BaseAgent):
         }
 
     async def _validate_interaction(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate card interaction is legal"""
+        """Validate card interaction is legal (Protected - internal validation)"""
         # Use Pydantic AI for complex rule interactions
         card1 = data.get("card1", {})
         card2 = data.get("card2", {})

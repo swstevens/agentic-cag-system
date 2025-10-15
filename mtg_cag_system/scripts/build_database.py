@@ -28,9 +28,14 @@ def main():
     print("=" * 70)
     print()
 
-    # Paths
-    json_path = "./data/mtgjson/AllPrintings.json"
-    db_path = "./data/cards.db"
+    # Paths (check both possible locations)
+    json_path = "./mtg_cag_system/data/mtgjson/AllPrintings.json"
+    if not os.path.exists(json_path):
+        json_path = "./data/mtgjson/AllPrintings.json"
+
+    db_path = "./mtg_cag_system/data/cards.db"
+    if not os.path.exists(os.path.dirname(db_path)):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
     # Check if JSON file exists
     if not os.path.exists(json_path):

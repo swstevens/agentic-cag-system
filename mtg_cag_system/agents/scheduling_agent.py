@@ -70,7 +70,7 @@ class SchedulingAgent(BaseAgent):
             )
 
     def _parse_plan(self, plan_text: str) -> List[Dict[str, str]]:
-        """Parse plan text into structured steps"""
+        """Parse plan text into structured steps (Protected - internal helper)"""
         # Simple parsing - in production would be more sophisticated
         steps = []
         for i, line in enumerate(plan_text.split('\n')):
