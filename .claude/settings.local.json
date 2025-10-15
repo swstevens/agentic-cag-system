@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(source:*)",
-      "Bash(python test:*)"
+      "Bash(python test:*)",
+      "Bash(python test_direct_deck_build.py)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,15 @@
+{
+  "format": "Modern",
+  "archetype": "aggro",
+  "colors": [
+    "R"
+  ],
+  "mainboard": [
+    {
+      "count": 4,
+      "name": "Mountain",
+      "mana_cost": null,
+      "type": "Basic Land \u2014 Mountain"
+    }
+  ]
+}

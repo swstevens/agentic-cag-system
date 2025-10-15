@@ -97,9 +97,17 @@ class SymbolicReasoningAgent(BaseAgent):
 
     def _check_format_legality(self, cards: List[Dict], format_name: str) -> bool:
         """Check if all cards are legal in format (Protected - internal validation)"""
+        # Normalize format name to lowercase for matching
+        format_lower = format_name.lower()
+
         for card in cards:
             legalities = card.get("legalities", {})
-            if legalities.get(format_name, "not_legal") != "legal":
+
+            # Check with case-insensitive format name
+            status = legalities.get(format_lower, "not_legal")
+
+            # Accept "Legal" or "legal" (case insensitive)
+            if status.lower() != "legal":
                 return False
         return True
 
