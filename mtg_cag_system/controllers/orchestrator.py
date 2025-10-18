@@ -26,6 +26,14 @@ class AgentOrchestrator:
         # Public: Cache service (users may need to access this)
         self.cache = cache
 
+        # Initialize deck builder service
+        from ..services.deck_builder_service import DeckBuilderService
+        self.deck_builder = DeckBuilderService(
+            knowledge_agent=knowledge_agent,
+            symbolic_agent=symbolic_agent,
+            card_lookup=knowledge_agent.card_lookup  # Use the CardLookupService instance from KnowledgeFetchAgent
+        )
+
     async def process_query(self, query: UserQuery) -> FusedResponse:
         """Process query through agent pipeline (Public API)"""
         reasoning_chain = ReasoningChain(query_id=query.query_id)
@@ -48,21 +56,70 @@ class AgentOrchestrator:
                 confidence=schedule_response.confidence
             ))
 
-            # Step 2: Knowledge fetch agent retrieves cards
-            knowledge_input = {
-                "query": query.query_text,
-                "filters": query.context.get("filters", {})
-            }
-            knowledge_response = await self.knowledge_agent.process(knowledge_input)
-            agent_responses["knowledge"] = knowledge_response
+            # Step 2: Based on scheduling agent's plan, choose appropriate processing path
+            query_type = schedule_response.data.get("query_type", "card_info")
+            
+            if query_type == "deck_building":
+                # Use deck builder service for deck building queries
+                # Extract format with proper case handling
+                format_name = schedule_response.data.get("format", query.context.get("format", "Standard"))
+                # Ensure proper case for well-known formats
+                format_map = {
+                    "standard": "Standard",
+                    "modern": "Modern",
+                    "legacy": "Legacy",
+                    "vintage": "Vintage",
+                    "commander": "Commander",
+                    "pioneer": "Pioneer"
+                }
+                format_name = format_map.get(format_name.lower(), format_name)
+                
+                deck_requirements = {
+                    "query": query.query_text,
+                    "format": format_name,
+                    "colors": schedule_response.data.get("colors", query.context.get("colors", [])),
+                    "strategy": schedule_response.data.get("strategy", ""),
+                    "budget": query.context.get("budget", None)
+                }
+                
+                deck_response = await self.deck_builder.build_deck(deck_requirements)
+                agent_responses["deck_builder"] = AgentResponse(
+                    agent_type="deck_builder",
+                    success=True,
+                    data=deck_response,
+                    confidence=0.9,
+                    reasoning_trace=[
+                        "Analyzed deck requirements",
+                        "Generated initial deck list",
+                        "Validated deck composition",
+                        "Applied deck building best practices"
+                    ]
+                )
+                
+                reasoning_chain.add_step(ReasoningStep(
+                    agent_type=AgentType.KNOWLEDGE_FETCH,
+                    action="build_deck",
+                    input_data=deck_requirements,
+                    output_data=deck_response,
+                    confidence=0.9
+                ))
+                
+            else:
+                # Use knowledge fetch agent for card information queries
+                knowledge_input = {
+                    "query": query.query_text,
+                    "filters": query.context.get("filters", {})
+                }
+                knowledge_response = await self.knowledge_agent.process(knowledge_input)
+                agent_responses["knowledge"] = knowledge_response
 
-            reasoning_chain.add_step(ReasoningStep(
-                agent_type=AgentType.KNOWLEDGE_FETCH,
-                action="fetch_cards",
-                input_data=knowledge_input,
-                output_data=knowledge_response.data,
-                confidence=knowledge_response.confidence
-            ))
+                reasoning_chain.add_step(ReasoningStep(
+                    agent_type=AgentType.KNOWLEDGE_FETCH,
+                    action="fetch_cards",
+                    input_data=knowledge_input,
+                    output_data=knowledge_response.data,
+                    confidence=knowledge_response.confidence
+                ))
 
             # Step 3: Symbolic reasoning (if needed)
             if query.intent and query.intent.requires_symbolic_reasoning:
@@ -112,11 +169,45 @@ class AgentOrchestrator:
         query: UserQuery
     ) -> Dict[str, Any]:
         """Fuse responses from multiple agents (Protected - internal fusion logic)"""
-        # Combine knowledge and validation results
         answer_parts = []
         sources = []
 
-        if "knowledge" in agent_responses and agent_responses["knowledge"].success:
+        # Handle deck building responses
+        if "deck_builder" in agent_responses and agent_responses["deck_builder"].success:
+            deck_data = agent_responses["deck_builder"].data
+
+            # Format deck data for display
+            deck_cards = deck_data.get("deck", [])
+
+            # Count cards by name
+            card_counts = {}
+            for card in deck_cards:
+                card_name = card.get("name", "Unknown")
+                card_counts[card_name] = card_counts.get(card_name, 0) + 1
+
+            # Format the deck list
+            formatted_deck = []
+            formatted_deck.append("Main Deck:")
+            for card_name, count in sorted(card_counts.items()):
+                formatted_deck.append(f"{count}x {card_name}")
+
+            # Add deck summary
+            deck_size = deck_data.get("deck_size", len(deck_cards))
+            valid = deck_data.get("valid", False)
+
+            answer_parts.append(f"Here's the deck I built ({deck_size} cards, {'Valid' if valid else 'Invalid'}):")
+            answer_parts.append("\n".join(formatted_deck))
+
+            # Add validation info
+            validation = deck_data.get("validation", {})
+            if validation:
+                answer_parts.append(f"\nValidation: {validation.get('validations', {})}")
+
+            # Add sources (top 5 unique cards)
+            sources.extend(list(card_counts.keys())[:5])
+
+        # Handle regular card knowledge responses
+        elif "knowledge" in agent_responses and agent_responses["knowledge"].success:
             knowledge_data = agent_responses["knowledge"].data
             answer_parts.append(knowledge_data.get("answer", ""))
 

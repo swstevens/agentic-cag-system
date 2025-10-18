@@ -6,7 +6,7 @@ Two-tier caching system:
 - Tier 2 (RAG Lookup): To be implemented - either document search or SQLite
 """
 
-from typing import Optional, Dict, Any, OrderedDict as OrderedDictType
+from typing import Optional, Dict, Any, List, OrderedDict as OrderedDictType
 from collections import OrderedDict
 from datetime import datetime
 from pydantic import BaseModel
@@ -32,7 +32,7 @@ class CAGCache:
     Uses OrderedDict for efficient LRU implementation.
     """
 
-    def __init__(self, max_size: int = 200):
+    def __init__(self, max_size: int = 2000):
         """
         Initialize CAG cache
 
@@ -174,9 +174,19 @@ class CAGCache:
     def clear(self) -> None:
         """Clear all entries from cache (Public API)"""
         self.__cache.clear()
-        self.hits = 0
-        self.misses = 0
-        self.evictions = 0
+        print("Cache cleared")
+        
+    def preload_format_cards(self, cards: List[MTGCard]) -> None:
+        """
+        Preload a list of format-legal cards into cache
+        
+        Args:
+            cards: List of MTGCard objects to preload
+        """
+        self.clear()  # Clear existing cache
+        for card in cards:
+            self.put(card)
+        print(f"✅ Preloaded {len(cards)} cards into cache")
 
     def get_stats(self) -> Dict[str, Any]:
         """

@@ -15,9 +15,18 @@ class KnowledgeService:
         # Private: Internal state
         self.__knowledge_base: Optional[CardCollection] = None
         self.__preloaded_context: Optional[str] = None
+        self.__tier1_hits = 0
+        self.__tier2_hits = 0
 
         # Public: Status flags (read-only via property recommended)
         self.kv_cache_ready = False
+        
+    def get_stats(self) -> Dict[str, int]:
+        """Get lookup statistics (Public API)"""
+        return {
+            "tier1_hits": self.__tier1_hits,
+            "tier2_hits": self.__tier2_hits
+        }
 
     async def load_cards_from_mtgjson(self, json_path: str, format_filter: Optional[str] = "Standard") -> CardCollection:
         """Load MTG cards from MTGJSON file (Public API)"""
@@ -64,6 +73,8 @@ class KnowledgeService:
         cache_key = self._make_cache_key(name)
         card_data = self.__cache.get(cache_key)
         if card_data:
+            # Track tier 1 hit (CAG knowledge cache)
+            self.__tier1_hits += 1
             return MTGCard(**card_data)
 
         # Cache miss - fallback to database
@@ -72,6 +83,8 @@ class KnowledgeService:
             if card:
                 # Cache in L3 for future lookups
                 self.__cache.set(cache_key, card.dict(), tier=3, ttl=None)
+                # Track tier 2 hit (database)
+                self.__tier2_hits += 1
                 print(f"📀 Database hit: {name} (cached to L3)")
                 return card
 

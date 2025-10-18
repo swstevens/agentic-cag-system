@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MTG Deck Building Assistant</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        #chat-container {
+            height: 600px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: white;
+            border-radius: 5px;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: 20%;
+        }
+        .assistant-message {
+            background-color: #f5f5f5;
+            margin-right: 20%;
+        }
+        #input-container {
+            display: flex;
+            gap: 10px;
+        }
+        #user-input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #1976d2;
+        }
+        .reasoning {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+            padding-left: 10px;
+            border-left: 2px solid #ccc;
+        }
+        .deck-list {
+            font-family: monospace;
+            white-space: pre-wrap;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 3px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>MTG Deck Building Assistant</h1>
+    <div id="chat-container"></div>
+    <div id="input-container">
+        <input type="text" id="user-input" placeholder="Ask about deck building, card recommendations, or strategies...">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <script>
+        // Generate a random session ID for this chat session
+        const sessionId = Math.random().toString(36).substring(2);
+        let messageCount = 0;
+
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            // Add user message to chat
+            addMessage('user', message);
+            input.value = '';
+
+            try {
+                // Note: The query parameters need to be sent in the URL for FastAPI
+                const response = await fetch(`/api/v1/query?query_text=${encodeURIComponent(message)}&session_id=${encodeURIComponent(sessionId)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('API request failed');
+                }
+
+                const data = await response.json();
+                addMessage('assistant', data);
+            } catch (error) {
+                addMessage('assistant', {
+                    answer: 'Sorry, there was an error processing your request.',
+                    error: error.message
+                });
+            }
+        }
+
+        function addMessage(type, content) {
+            const container = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}-message`;
+            messageDiv.id = `message-${messageCount++}`;
+
+            if (type === 'user') {
+                messageDiv.textContent = content;
+            } else {
+                // For assistant messages, format the response
+                const answer = document.createElement('div');
+                answer.style.whiteSpace = 'pre-wrap';  // Preserve newlines and formatting
+                answer.textContent = content.answer;
+                messageDiv.appendChild(answer);
+
+                // Add reasoning chain if available
+                if (content.reasoning_chain) {
+                    const reasoning = document.createElement('div');
+                    reasoning.className = 'reasoning';
+                    reasoning.textContent = content.reasoning_chain.map(r => r.reasoning).join(' → ');
+                    messageDiv.appendChild(reasoning);
+                }
+
+                // Look for deck content in the metadata
+                if (content.metadata && content.metadata.deck_content) {
+                    const deckList = document.createElement('div');
+                    deckList.className = 'deck-list';
+                    deckList.textContent = content.metadata.deck_content;
+                    messageDiv.appendChild(deckList);
+                }
+            }
+
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Allow Enter key to send message
+        document.getElementById('user-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

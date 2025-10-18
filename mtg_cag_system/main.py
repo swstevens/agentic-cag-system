@@ -1,19 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import uvicorn
+import os
+from pathlib import Path
 
 from .config import settings
 from .models.card import MTGCard, CardCollection, CardColor, CardType
 from .services.cache_service import MultiTierCache
 from .services.knowledge_service import KnowledgeService
 from .services.database_service import DatabaseService
+from .services.card_lookup_service import CardLookupService
 from .agents.scheduling_agent import SchedulingAgent
 from .agents.knowledge_fetch_agent import KnowledgeFetchAgent
 from .agents.symbolic_reasoning_agent import SymbolicReasoningAgent
 from .controllers.orchestrator import AgentOrchestrator
 from .routers.api import router
-import os
 
 
 @asynccontextmanager
@@ -42,6 +46,9 @@ async def lifespan(app: FastAPI):
         print(f"   Run 'python -m mtg_cag_system.scripts.build_database' to create it")
         print(f"   System will work with limited card data (sample cards only)")
 
+    # Initialize card lookup service
+    card_lookup_service = CardLookupService(database_service=db)
+    
     # Initialize knowledge service with database fallback
     knowledge_service = KnowledgeService(cache, database_service=db)
 
@@ -85,7 +92,7 @@ async def lifespan(app: FastAPI):
         api_key=settings.openai_api_key
     )
     knowledge_agent = KnowledgeFetchAgent(
-        knowledge_service=knowledge_service,
+        card_lookup_service=card_lookup_service,
         model_name=settings.default_model,
         api_key=settings.openai_api_key
     )
@@ -138,16 +145,6 @@ app.add_middleware(
 app.include_router(router)
 
 
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "MTG CAG System API",
-        "version": settings.app_version,
-        "docs": "/docs"
-    }
-
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -156,6 +153,17 @@ async def health_check():
         "cache_ready": app.state.cache is not None,
         "knowledge_ready": app.state.knowledge_service.kv_cache_ready
     }
+
+
+@app.get("/")
+async def root():
+    """Serve the chat interface"""
+    return FileResponse(str(Path(__file__).parent / 'static/index.html'))
+
+
+# Mount the static files directory
+static_dir = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 if __name__ == "__main__":

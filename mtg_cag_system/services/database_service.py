@@ -210,6 +210,36 @@ class DatabaseService:
             return self._row_to_card(row)
         return None
 
+    def _normalize_color(self, color: str) -> str:
+        """
+        Convert color names to single-letter codes
+
+        Args:
+            color: Color name or code (e.g., "Red", "red", "R")
+
+        Returns:
+            Single-letter color code (W, U, B, R, G, C)
+        """
+        # Mapping of color names to codes
+        color_map = {
+            'white': 'W',
+            'blue': 'U',
+            'black': 'B',
+            'red': 'R',
+            'green': 'G',
+            'colorless': 'C'
+        }
+
+        # Normalize input
+        color_lower = color.lower().strip()
+
+        # If it's already a single character code, return it uppercase
+        if len(color) == 1:
+            return color.upper()
+
+        # Otherwise, look up in the map
+        return color_map.get(color_lower, color.upper())
+
     def search_cards(
         self,
         query: Optional[str] = None,
@@ -218,6 +248,8 @@ class DatabaseService:
         cmc_min: Optional[float] = None,
         cmc_max: Optional[float] = None,
         rarity: Optional[str] = None,
+        format_legality: Optional[Dict[str, str]] = None,  # e.g. {"standard": "legal"}
+        strict_colors: bool = True,  # Only cards with EXACTLY these colors (no more, no less)
         limit: int = 100
     ) -> List[MTGCard]:
         """
@@ -225,11 +257,14 @@ class DatabaseService:
 
         Args:
             query: Text to search in name/oracle text (uses FTS)
-            colors: List of color codes (W, U, B, R, G)
+            colors: List of color codes or names (W/White, U/Blue, B/Black, R/Red, G/Green)
             types: List of types to filter by
             cmc_min: Minimum CMC
             cmc_max: Maximum CMC
             rarity: Card rarity
+            format_legality: Format and status (e.g. {"standard": "legal"})
+            strict_colors: If True, only return cards with EXACTLY these colors (mono-color decks)
+                          If False, return cards that contain ANY of these colors (multicolor OK)
             limit: Maximum results to return
 
         Returns:
@@ -255,9 +290,40 @@ class DatabaseService:
 
         # Add filters
         if colors:
-            for color in colors:
-                sql += " AND colors LIKE ?"
-                params.append(f'%"{color}"%')
+            # Normalize color names to codes
+            colors = [self._normalize_color(c) for c in colors]
+
+            if strict_colors:
+                # Strict mode for deck building:
+                # - Mono-color: Only cards with EXACTLY that color or colorless
+                # - Multi-color: Cards with ANY COMBINATION of the specified colors (but no other colors)
+                #   Example: Golgari (BG) can have B, G, BG, or colorless - but NOT W, U, or R
+
+                if len(colors) == 1:
+                    # Mono-color: Match cards with exactly this color OR colorless
+                    color = colors[0]
+                    sql += " AND (color_identity LIKE ? OR color_identity = '[]')"
+                    params.append(f'["{color}"]')
+                else:
+                    # Multi-color: Exclude cards that contain colors NOT in our list
+                    # Get the opposite colors (colors we DON'T want)
+                    all_colors = {'W', 'U', 'B', 'R', 'G'}
+                    excluded_colors = all_colors - set(colors)
+
+                    # Add exclusion conditions for each color we don't want
+                    for excluded_color in excluded_colors:
+                        sql += " AND color_identity NOT LIKE ?"
+                        params.append(f'%"{excluded_color}"%')
+            else:
+                # Loose mode: Cards that contain ANY of the specified colors (multicolor OK)
+                color_conditions = []
+                for color in colors:
+                    color_conditions.append("(colors LIKE ? OR color_identity LIKE ?)")
+                    pattern = f'%"{color}"%'
+                    params.extend([pattern, pattern])
+
+                if color_conditions:
+                    sql += " AND (" + " OR ".join(color_conditions) + ")"
 
         if types:
             for card_type in types:
@@ -276,11 +342,63 @@ class DatabaseService:
             sql += " AND rarity = ?"
             params.append(rarity)
 
+        if format_legality:
+            for format_name, status in format_legality.items():
+                # Search in the raw JSON text since it's stored as a string
+                # Legalities are stored as: {"format": "Status"} where format is lowercase
+                # but Status has capital first letter (e.g., "Legal", "Banned", "Not_legal")
+                sql += " AND legalities LIKE ?"
+                # Capitalize the first letter of status to match the stored format
+                status_capitalized = status.capitalize()
+                # Match the exact JSON structure: {"format": "Legal"}
+                params.append(f'%"{format_name.lower()}": "{status_capitalized}"%')
+
         sql += f" LIMIT {limit}"
+
+        print("\nExecuting SQL Query:")
+        print("SQL:", sql)
+        print("Params:", params)
 
         cursor.execute(sql, params)
         rows = cursor.fetchall()
 
+        cards = [self._row_to_card(row) for row in rows]
+
+        if colors and strict_colors:
+            if len(colors) == 1:
+                print(f"Found {len(cards)} mono-{colors[0]} cards (including colorless)")
+            else:
+                excluded = sorted(list({'W', 'U', 'B', 'R', 'G'} - set(colors)))
+                print(f"Found {len(cards)} cards (excluding {', '.join(excluded)})")
+        else:
+            print(f"Found {len(cards)} cards")
+
+        if len(cards) > 0:
+            print("Sample cards:", ", ".join(c.name for c in cards[:5]))
+
+        return cards
+
+    def get_cards_by_format(self, format_name: str, status: str = "legal") -> List[MTGCard]:
+        """
+        Get all cards that have a specific legality status in a given format
+        
+        Args:
+            format_name: The format to check (e.g. "standard", "modern", "commander")
+            status: The legality status to look for (e.g. "legal", "not_legal", "banned")
+            
+        Returns:
+            List of matching MTGCard objects
+        """
+        if not self.__conn:
+            return []
+            
+        cursor = self.__conn.cursor()
+        cursor.execute(
+            "SELECT * FROM cards WHERE JSON_EXTRACT(legalities, ?) = ?",
+            (f"$.{format_name.lower()}", status.lower())
+        )
+        
+        rows = cursor.fetchall()
         return [self._row_to_card(row) for row in rows]
 
     def fuzzy_search(self, query: str, limit: int = 10) -> List[MTGCard]:
@@ -349,5 +467,5 @@ class DatabaseService:
             set_code=row['set_code'],
             rarity=row['rarity'],
             legalities=legalities,
-            keywords=keywords
+            keywords=keywords,
         )

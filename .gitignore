@@ -171,3 +171,7 @@ Thumbs.db
 data/mtgjson/*.json
 mtg_cag_system/data/mtgjson/AllPrintings.json
 mtg_cag_system/data/cards.db
+.sesskey
+data/AllPrintings.json
+.claude/settings.local.json
+data/cards.db
