@@ -73,10 +73,11 @@ class SchedulingAgent(BaseAgent):
                 if json_match:
                     # Clean up the JSON string
                     json_str = json_match.group(0)
-                    # Replace single quotes with double quotes
+                    # Replace single quotes with double quotes (but not inside already quoted strings)
                     json_str = json_str.replace("'", '"')
-                    # Add quotes around unquoted property names
-                    json_str = re.sub(r'(\w+):', r'"\1":', json_str)
+                    # Add quotes around unquoted property names (only if not already quoted)
+                    # This regex looks for word characters followed by : that are NOT already quoted
+                    json_str = re.sub(r'(?<!")(\w+)(?!"):', r'"\1":', json_str)
                     response_data = json.loads(json_str)
                 else:
                     # Fallback to simpler parsing

@@ -72,6 +72,29 @@ class KnowledgeFetchAgent(BaseAgent):
             # Get lookup statistics
             lookup_stats = self.card_lookup.get_stats()
 
+            # Format a readable answer for the user
+            answer_parts = []
+            if relevant_cards:
+                if len(relevant_cards) == 1:
+                    # Single card lookup - show detailed info
+                    card = relevant_cards[0]
+                    answer_parts.append(f"**{card.name}** {card.mana_cost or ''}")
+                    answer_parts.append(f"{card.type_line}")
+                    if card.oracle_text:
+                        answer_parts.append(f"\n{card.oracle_text}")
+                    if card.power and card.toughness:
+                        answer_parts.append(f"\n{card.power}/{card.toughness}")
+                    answer_parts.append(f"\n*{card.set_code.upper()} - {card.rarity}*")
+                else:
+                    # Multiple cards - show list with brief info
+                    answer_parts.append(f"Found {len(relevant_cards)} card(s):\n")
+                    for card in relevant_cards:
+                        answer_parts.append(f"• **{card.name}** ({card.mana_cost or 'No cost'}) - {card.type_line}")
+            else:
+                answer_parts.append(f"No cards found matching: {', '.join(card_names)}")
+
+            formatted_answer = "\n".join(answer_parts)
+
             # Return ONLY the card data (MTGCard schema)
             return AgentResponse(
                 agent_type=self.agent_type.value,
@@ -79,7 +102,8 @@ class KnowledgeFetchAgent(BaseAgent):
                 data={
                     "cards": [c.dict() for c in relevant_cards],
                     "extracted_card_names": card_names,
-                    "lookup_stats": lookup_stats
+                    "lookup_stats": lookup_stats,
+                    "answer": formatted_answer  # Add formatted answer
                 },
                 confidence=1.0 if relevant_cards else 0.0,
                 reasoning_trace=lookup_trace + [
