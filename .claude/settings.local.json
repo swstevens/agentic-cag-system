@@ -3,7 +3,8 @@
     "allow": [
       "Bash(source:*)",
       "Bash(python test:*)",
-      "Bash(python test_direct_deck_build.py)"
+      "Bash(python test_direct_deck_build.py)",
+      "Bash(python -m py_compile:*)"
     ],
     "deny": [],
     "ask": []

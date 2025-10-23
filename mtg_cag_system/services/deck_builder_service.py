@@ -60,6 +60,57 @@ class DeckBuilderService:
         self.card_lookup = card_lookup
         self.max_iterations = max_iterations
 
+        # Protected deck state (initialized in build_deck)
+        self._deck = []
+        self._to_add = []
+
+    # === Deck Access Methods ===
+
+    def _get_deck(self) -> List[Dict[str, Any]]:
+        """Get a copy of the current validated deck"""
+        return self._deck.copy()
+
+    def _get_deck_size(self) -> int:
+        """Get the current size of the validated deck"""
+        return len(self._deck)
+
+    def _add_to_deck(self, cards: List[Dict[str, Any]]) -> None:
+        """
+        Add validated cards to the deck.
+        Only use this after cards have been validated!
+
+        Args:
+            cards: List of validated card dictionaries
+        """
+        self._deck.extend(cards)
+
+    def _get_to_add(self) -> List[Dict[str, Any]]:
+        """Get a copy of the current candidate cards pending validation"""
+        return self._to_add.copy()
+
+    def _get_to_add_size(self) -> int:
+        """Get the number of candidate cards pending validation"""
+        return len(self._to_add)
+
+    def _set_to_add(self, cards: List[Dict[str, Any]]) -> None:
+        """
+        Set the candidate cards list.
+        These cards will be validated before being added to the deck.
+
+        Args:
+            cards: List of candidate card dictionaries
+        """
+        self._to_add = cards
+
+    def _clear_to_add(self) -> None:
+        """Clear the candidate cards list"""
+        self._to_add = []
+
+    def _reset_deck_state(self) -> None:
+        """Reset the deck state for a new build"""
+        self._deck = []
+        self._to_add = []
+
     async def build_deck(
         self,
         requirements: Dict[str, Any]
@@ -89,8 +140,8 @@ class DeckBuilderService:
         target_size = self.FORMAT_DECK_SIZES.get(deck_format, 60)
         print(f"Target deck size for {deck_format}: {target_size} cards (exact)")
 
-        # Initialize deck
-        deck = []
+        # Reset deck state for new build
+        self._reset_deck_state()
         card_names_tried = set()
         iterations = []
 
@@ -101,40 +152,59 @@ class DeckBuilderService:
             print(f"{'=' * 80}")
 
             # Step 1: Assess current deck state
-            current_size = len(deck)
+            current_size = self._get_deck_size()
             print(f"Current deck size: {current_size}/{target_size}")
+            print(f"Candidate cards to validate: {self._get_to_add_size()}")
 
-            if current_size > 0:
-                # Validate current deck
-                validation = await self._validate_deck(deck, deck_format)
-                print(f"Validation: {validation}")
+            # Step 2: Validate candidate cards (if any)
+            if self._get_to_add_size() > 0:
+                print(f"\n{'=' * 80}")
+                print("VALIDATING CANDIDATE CARDS")
+                print(f"{'=' * 80}")
 
-                # Check if deck is complete and legal (exact size required)
-                if validation['valid'] and current_size == target_size:
-                    print(f"\n✅ DECK COMPLETE AND LEGAL!")
+                validation_result = DeckAnalyzer.validate_candidate_cards(
+                    candidate_cards=self._get_to_add(),
+                    current_deck=self._get_deck(),
+                    deck_format=deck_format
+                )
 
-                    # Analyze deck quality and apply recommendations
-                    print(f"\n{'=' * 80}")
-                    print("ANALYZING DECK QUALITY")
-                    print(f"{'=' * 80}")
-                    deck = await self._improve_deck_quality(deck, archetype, colors, deck_format, target_size)
+                print(f"Valid cards: {validation_result['num_valid']}")
+                print(f"Invalid cards: {validation_result['num_invalid']}")
 
-                    break
+                if validation_result['issues']:
+                    print("\nIssues found:")
+                    for issue in validation_result['issues']:
+                        print(f"  - {issue}")
 
-                # Remove illegal cards
-                if not validation['validations'].get('format_legal', True):
-                    print("\n⚠️  Removing illegal cards...")
-                    deck = self._remove_illegal_cards(deck, deck_format, validation)
-                    print(f"   Deck size after removal: {len(deck)}")
+                # Move valid cards from to_add to deck
+                valid_cards = validation_result['valid_cards']
+                self._add_to_deck(valid_cards)
+                print(f"\n✅ Added {len(valid_cards)} validated cards to deck")
+                print(f"New deck size: {self._get_deck_size()}/{target_size}")
 
-            # Step 2: Determine what cards are needed
-            cards_needed = target_size - len(deck)
+                # Clear to_add list
+                self._clear_to_add()
+
+            # Step 3: Check if deck is complete
+            if self._get_deck_size() == target_size:
+                print(f"\n✅ DECK COMPLETE!")
+
+                # Analyze deck quality and apply recommendations
+                print(f"\n{'=' * 80}")
+                print("ANALYZING DECK QUALITY")
+                print(f"{'=' * 80}")
+                await self._improve_deck_quality(archetype, colors, deck_format, target_size)
+
+                break
+
+            # Step 4: Determine what cards are needed
+            cards_needed = target_size - self._get_deck_size()
             print(f"\nCards needed: {cards_needed}")
 
             if cards_needed <= 0:
                 continue
 
-            # Step 3: Fetch new cards based on requirements
+            # Step 5: Fetch new candidate cards based on requirements
             new_cards = await self._fetch_cards_for_requirements(
                 colors=colors,
                 archetype=archetype,
@@ -143,16 +213,17 @@ class DeckBuilderService:
                 already_tried=card_names_tried
             )
 
-            # Step 4: Add cards to deck (respecting 4-copy limit)
-            added_count = self._add_cards_to_deck(deck, new_cards, cards_needed)
-            print(f"Added {added_count} cards to deck")
+            # Step 6: Add fetched cards to to_add list (will be validated next iteration)
+            candidate_cards = self._prepare_candidate_cards(new_cards, cards_needed)
+            self._set_to_add(candidate_cards)
+            print(f"Prepared {self._get_to_add_size()} candidate cards for validation")
 
             # Track iteration
             iterations.append({
                 'iteration': iteration,
-                'deck_size': len(deck),
-                'cards_added': added_count,
-                'validation': validation if current_size > 0 else None
+                'deck_size': self._get_deck_size(),
+                'candidates_prepared': self._get_to_add_size(),
+                'cards_needed': cards_needed
             })
 
             # Safety check
@@ -160,22 +231,21 @@ class DeckBuilderService:
                 print(f"\n⚠️  Reached maximum iterations ({self.max_iterations})")
                 break
 
-        # Final validation
+        # Final status
         print(f"\n{'=' * 80}")
-        print("FINAL VALIDATION")
+        print("FINAL DECK STATUS")
         print(f"{'=' * 80}")
+        print(f"Final deck size: {self._get_deck_size()}/{target_size}")
 
-        final_validation = await self._validate_deck(deck, deck_format)
-        print(f"Final deck size: {len(deck)}")
-        print(f"Valid: {final_validation['valid']}")
-        print(f"Validations: {final_validation['validations']}")
+        is_valid = self._get_deck_size() == target_size
+        print(f"Valid: {is_valid}")
 
         # Build result
+        final_deck = self._get_deck()
         return {
-            'deck': deck,
-            'deck_size': len(deck),
-            'valid': final_validation['valid'],
-            'validation': final_validation,
+            'deck': final_deck,
+            'deck_size': len(final_deck),
+            'valid': is_valid,
             'iterations': iterations,
             'total_iterations': iteration
         }
@@ -222,29 +292,133 @@ class DeckBuilderService:
 
         # Score cards based on how well they match the archetype
         scored_cards = []
+        basic_lands = []
+
         for card in legal_cards:
-            score = 0
-            card_text = (card.oracle_text or "").lower()
             card_type = (card.type_line or "").lower()
-            
-            # Score based on archetype keywords
-            for keyword in archetype_keywords:
-                if keyword in card_text or keyword in card_type:
-                    score += 1
-            
-            # Only include cards that match the archetype
-            if score > 0:
-                scored_cards.append((card, score))
-                already_tried.add(card.name)
+
+            # Separate basic lands from other cards
+            is_basic_land = 'basic land' in card_type or card.name in ['Mountain', 'Island', 'Plains', 'Swamp', 'Forest', 'Wastes']
+
+            if is_basic_land:
+                basic_lands.append(card)
+            else:
+                score = 0
+                card_text = (card.oracle_text or "").lower()
+
+                # Score based on archetype keywords
+                for keyword in archetype_keywords:
+                    if keyword in card_text or keyword in card_type:
+                        score += 1
+
+                # Only include cards that match the archetype
+                if score > 0:
+                    scored_cards.append((card, score))
+                    already_tried.add(card.name)
 
         # Sort by score descending
         scored_cards.sort(key=lambda x: x[1], reverse=True)
-        
-        # Take top matching cards
-        fetched_cards = [card for card, score in scored_cards[:cards_needed]]
-        print(f"Selected {len(fetched_cards)} cards matching {archetype} playstyle")
-        
+
+        # Calculate how many lands vs non-lands to include
+        # Use archetype-specific land ratios from DeckAnalyzer
+        arch_data = DeckAnalyzer.ARCHETYPE_CURVES.get(archetype.lower(), DeckAnalyzer.ARCHETYPE_CURVES['midrange'])
+        ideal_land_ratio = sum(arch_data['land_ratio']) / 2  # Average of min/max
+
+        estimated_lands_needed = int(cards_needed * ideal_land_ratio)
+        estimated_nonlands_needed = cards_needed - estimated_lands_needed
+
+        # Take top matching non-land cards
+        nonland_cards = [card for card, score in scored_cards[:estimated_nonlands_needed]]
+
+        # Distribute basic lands across deck colors
+        land_cards = self._distribute_lands_by_color(colors, basic_lands, estimated_lands_needed)
+
+        # Combine non-lands and lands
+        fetched_cards = nonland_cards + land_cards
+
+        # Print summary with color breakdown for multi-color decks
+        if len(colors) > 1:
+            land_counts = {}
+            for land in land_cards:
+                land_name = land.name
+                land_counts[land_name] = land_counts.get(land_name, 0) + 1
+            land_summary = ", ".join([f"{count}x {name}" for name, count in land_counts.items()])
+            print(f"Selected {len(nonland_cards)} non-land cards and {len(land_cards)} lands ({land_summary})")
+        else:
+            print(f"Selected {len(nonland_cards)} non-land cards and {len(land_cards)} lands matching {archetype} playstyle")
+
         return fetched_cards
+
+    def _distribute_lands_by_color(
+        self,
+        colors: List[str],
+        basic_lands: List[MTGCard],
+        total_lands_needed: int
+    ) -> List[MTGCard]:
+        """
+        Distribute basic lands proportionally across deck colors.
+        For multi-color decks, splits lands evenly between colors.
+
+        Args:
+            colors: List of color codes (e.g., ['R', 'G'])
+            basic_lands: Available basic land cards
+            total_lands_needed: Total number of lands to include
+
+        Returns:
+            List of land cards distributed across colors
+        """
+        if len(colors) == 0:
+            return []
+
+        # Normalize colors to single-letter codes
+        normalized_colors = []
+        for color in colors:
+            normalized_color = self.card_lookup._CardLookupService__database._normalize_color(color)
+            normalized_colors.append(normalized_color)
+
+        print(f"    DEBUG: Original colors: {colors}, Normalized: {normalized_colors}, Total lands needed: {total_lands_needed}")
+
+        basic_land_map = {
+            'W': 'Plains',
+            'U': 'Island',
+            'B': 'Swamp',
+            'R': 'Mountain',
+            'G': 'Forest'
+        }
+
+        land_cards = []
+
+        if len(normalized_colors) == 1:
+            # Mono-color: all lands of one type
+            color_code = normalized_colors[0]
+            basic_land_name = basic_land_map.get(color_code, 'Mountain')
+            matching_lands = [land for land in basic_lands if land.name == basic_land_name]
+
+            print(f"    DEBUG: Mono-color - Looking for {basic_land_name}, found {len(matching_lands)} matches")
+
+            if matching_lands:
+                land_cards = matching_lands[:1] * total_lands_needed
+        else:
+            # Multi-color: distribute evenly
+            lands_per_color = total_lands_needed // len(normalized_colors)
+            remainder = total_lands_needed % len(normalized_colors)
+
+            print(f"    DEBUG: Multi-color - {lands_per_color} per color, {remainder} remainder")
+
+            for i, color_code in enumerate(normalized_colors):
+                basic_land_name = basic_land_map.get(color_code, 'Mountain')
+                matching_lands = [land for land in basic_lands if land.name == basic_land_name]
+
+                print(f"    DEBUG: Color {color_code} -> {basic_land_name}, found {len(matching_lands)} matches")
+
+                if matching_lands:
+                    # Give the first color(s) one extra land if there's a remainder
+                    lands_for_this_color = lands_per_color + (1 if i < remainder else 0)
+                    land_cards.extend(matching_lands[:1] * lands_for_this_color)
+                    print(f"    DEBUG: Adding {lands_for_this_color}x {basic_land_name}")
+
+        print(f"    DEBUG: Total land cards returned: {len(land_cards)}")
+        return land_cards
 
     def _get_archetype_keywords(self, archetype: str) -> List[str]:
         """
@@ -285,101 +459,29 @@ class DeckBuilderService:
         else:
             return []  # No specific keywords for unknown archetypes
 
-    async def _validate_deck(
+    def _prepare_candidate_cards(
         self,
-        deck: List[Dict[str, Any]],
-        deck_format: str
-    ) -> Dict[str, Any]:
-        """
-        Validate deck using symbolic reasoning agent
-
-        Returns validation results
-        """
-        validation_response = await self.symbolic_agent.process({
-            'type': 'deck_validation',
-            'data': {
-                'cards': deck,
-                'format': deck_format
-            }
-        })
-
-        return validation_response.data
-
-    def _remove_illegal_cards(
-        self,
-        deck: List[Dict[str, Any]],
-        deck_format: str,
-        validation: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        Remove cards that are not legal in the format
-
-        Returns cleaned deck list
-        """
-        legal_deck = []
-        format_key = deck_format.lower()
-        
-        for card in deck:
-            legalities = card.get('legalities', {})
-            print(f"\nChecking legality for {card['name']}:")
-            print(f"  Full legalities: {legalities}")
-            
-            # Get format status, defaulting to not_legal if not found
-            status = legalities.get(format_key, 'not_legal').lower()
-            print(f"  Status in {deck_format}: {status}")
-
-            if status in ['legal', 'legal/gc', 'restricted']:
-                legal_deck.append(card)
-            else:
-                print(f"   Removing illegal: {card['name']} ({status} in {deck_format})")
-                print(f"   Full legalities: {legalities}")
-
-        return legal_deck
-
-    def _add_cards_to_deck(
-        self,
-        deck: List[Dict[str, Any]],
         new_cards: List[MTGCard],
         max_to_add: int
-    ) -> int:
+    ) -> List[Dict[str, Any]]:
         """
-        Add cards to deck, respecting 4-copy limit for non-basic lands
+        Prepare candidate cards for validation by converting to dict format.
+        Does NOT validate or add to deck - just prepares them for the to_add list.
 
-        Returns number of cards added
+        Args:
+            new_cards: List of MTGCard objects from fetch
+            max_to_add: Maximum number of cards to prepare
+
+        Returns:
+            List of card dictionaries ready for validation
         """
-        # Count existing cards
-        card_counts = {}
-        for card in deck:
-            name = card['name']
-            card_counts[name] = card_counts.get(name, 0) + 1
+        prepared = []
 
-        added = 0
+        for card in new_cards[:max_to_add]:
+            card_dict = card.dict() if hasattr(card, 'dict') else card.model_dump()
+            prepared.append(card_dict)
 
-        for card in new_cards:
-            if added >= max_to_add:
-                break
-
-            name = card.name
-            current_count = card_counts.get(name, 0)
-
-            # Check if it's a basic land
-            is_basic = 'Basic Land' in card.type_line or name in ['Mountain', 'Island', 'Plains', 'Swamp', 'Forest']
-
-            # Determine how many copies we can add
-            if is_basic:
-                copies_to_add = min(max_to_add - added, 4)  # Add up to 4 at a time
-            else:
-                max_allowed = 4
-                copies_available = max_allowed - current_count
-                copies_to_add = min(copies_available, max_to_add - added)
-
-            # Add copies
-            for _ in range(copies_to_add):
-                deck.append(card.dict() if hasattr(card, 'dict') else card.model_dump())
-                card_counts[name] = card_counts.get(name, 0) + 1
-                added += 1
-
-        return added
+        return prepared
 
     def _dict_to_card(self, card_dict: Dict[str, Any]) -> MTGCard:
         """Convert dict to MTGCard object"""
@@ -425,28 +527,24 @@ class DeckBuilderService:
 
     async def _improve_deck_quality(
         self,
-        deck: List[Dict[str, Any]],
         archetype: str,
         colors: List[str],
         deck_format: str,
         target_size: int
-    ) -> List[Dict[str, Any]]:
+    ) -> None:
         """
         Analyze deck quality and apply recommendations from DeckAnalyzer
         Maintains exactly target_size cards by removing cards when adding lands
+        Modifies the protected _deck directly.
 
         Args:
-            deck: Current deck list
             archetype: Deck archetype (aggro, control, midrange, combo)
             colors: Deck colors
             deck_format: Format (Standard, Modern, etc.)
             target_size: Exact deck size to maintain (60 for Standard, 100 for Commander, etc.)
-
-        Returns:
-            Improved deck list with exactly target_size cards
         """
         # Run deck analysis
-        analysis = DeckAnalyzer.analyze_full_deck(deck, archetype)
+        analysis = DeckAnalyzer.analyze_full_deck(self._get_deck(), archetype)
 
         print(f"\nDeck Analysis Results:")
         print(f"  Overall Score: {analysis['overall_score']}/100")
@@ -463,43 +561,37 @@ class DeckBuilderService:
 
         if land_ratio['ratio_quality'] == 'too_few_lands':
             print(f"\n⚠️  Too few lands! Adding basic lands and removing cards...")
-            deck = await self._add_basic_lands_and_remove_cards(
-                deck, colors, land_ratio, mana_curve, deck_format, target_size
+            await self._add_basic_lands_and_remove_cards(
+                colors, land_ratio, mana_curve, deck_format, target_size
             )
         elif land_ratio['ratio_quality'] == 'too_many_lands':
             print(f"\n⚠️  Too many lands! Removing excess lands...")
-            deck = self._remove_excess_lands(deck, land_ratio)
+            self._remove_excess_lands(land_ratio)
 
         # Re-analyze after improvements
-        final_analysis = DeckAnalyzer.analyze_full_deck(deck, archetype)
+        final_analysis = DeckAnalyzer.analyze_full_deck(self._get_deck(), archetype)
         print(f"\nFinal Land Ratio: {final_analysis['land_ratio']['land_percentage']}% ({final_analysis['land_ratio']['ratio_quality']})")
         print(f"Final Score: {final_analysis['overall_score']}/100")
 
-        return deck
-
     async def _add_basic_lands_and_remove_cards(
         self,
-        deck: List[Dict[str, Any]],
         colors: List[str],
         land_ratio: Dict[str, Any],
         mana_curve: Dict[str, Any],
         deck_format: str,
         target_size: int
-    ) -> List[Dict[str, Any]]:
+    ) -> None:
         """
         Add appropriate basic lands to reach ideal land ratio
         Remove cards intelligently to maintain exact deck size
+        Modifies the protected _deck directly.
 
         Args:
-            deck: Current deck
             colors: Deck colors
             land_ratio: Land ratio analysis from DeckAnalyzer
             mana_curve: Mana curve analysis from DeckAnalyzer
             deck_format: Format for validation
             target_size: Exact deck size to maintain
-
-        Returns:
-            Deck with improved land ratio and exactly target_size cards
         """
         # Calculate how many lands to add
         current_lands = land_ratio['land_count']
@@ -512,15 +604,14 @@ class DeckBuilderService:
         print(f"  Lands to add: {lands_to_add}")
 
         if lands_to_add == 0:
-            return deck
+            return
 
         # Step 1: Remove cards based on mana curve analysis
         print(f"\n  Removing {lands_to_add} cards to make room for lands...")
-        deck = self._remove_cards_intelligently(deck, lands_to_add, mana_curve)
-        print(f"  Deck size after removal: {len(deck)}")
+        self._remove_cards_intelligently(lands_to_add, mana_curve)
+        print(f"  Deck size after removal: {self._get_deck_size()}")
 
-        # Step 2: Add basic lands
-        # Determine which basic land to add based on colors
+        # Step 2: Add basic lands distributed across colors
         basic_land_map = {
             'W': 'Plains',
             'U': 'Island',
@@ -529,55 +620,72 @@ class DeckBuilderService:
             'G': 'Forest'
         }
 
-        # Get the appropriate basic land name
+        lands_to_add_list = []
+
         if len(colors) == 0:
             # No colors specified - colorless deck, use Wastes
             basic_land_name = 'Wastes'
             print(f"  ℹ️  No colors specified, using {basic_land_name} for colorless deck")
+            basic_land = self.card_lookup._CardLookupService__database.get_card_by_name(basic_land_name)
+            if basic_land:
+                for _ in range(lands_to_add):
+                    lands_to_add_list.append(basic_land.dict() if hasattr(basic_land, 'dict') else basic_land.model_dump())
         elif len(colors) == 1:
             # Mono-color: add that color's basic land
             color_code = self.card_lookup._CardLookupService__database._normalize_color(colors[0])
             basic_land_name = basic_land_map.get(color_code, 'Wastes')
+            basic_land = self.card_lookup._CardLookupService__database.get_card_by_name(basic_land_name)
+            if basic_land:
+                for _ in range(lands_to_add):
+                    lands_to_add_list.append(basic_land.dict() if hasattr(basic_land, 'dict') else basic_land.model_dump())
+                print(f"  ✅ Adding {lands_to_add}x {basic_land_name}")
         else:
-            # Multi-color: distribute evenly or pick first color
-            # TODO: Improve this to add multiple basic land types proportionally
-            color_code = self.card_lookup._CardLookupService__database._normalize_color(colors[0])
-            basic_land_name = basic_land_map.get(color_code, 'Wastes')
+            # Multi-color: distribute evenly across colors
+            lands_per_color = lands_to_add // len(colors)
+            remainder = lands_to_add % len(colors)
 
-        # Fetch the basic land card
-        basic_land = self.card_lookup._CardLookupService__database.get_card_by_name(basic_land_name)
+            land_distribution = {}
+            for i, color in enumerate(colors):
+                color_code = self.card_lookup._CardLookupService__database._normalize_color(color)
+                basic_land_name = basic_land_map.get(color_code, 'Mountain')
+                basic_land = self.card_lookup._CardLookupService__database.get_card_by_name(basic_land_name)
 
-        if basic_land:
-            # Add the basic lands to the deck
-            for _ in range(lands_to_add):
-                deck.append(basic_land.dict() if hasattr(basic_land, 'dict') else basic_land.model_dump())
-            print(f"  ✅ Added {lands_to_add}x {basic_land_name}")
-            print(f"  Final deck size: {len(deck)} (target: {target_size})")
+                if basic_land:
+                    # Give the first color(s) one extra land if there's a remainder
+                    lands_for_this_color = lands_per_color + (1 if i < remainder else 0)
+                    land_distribution[basic_land_name] = lands_for_this_color
+
+                    for _ in range(lands_for_this_color):
+                        lands_to_add_list.append(basic_land.dict() if hasattr(basic_land, 'dict') else basic_land.model_dump())
+
+            # Print multi-color land distribution
+            land_summary = ", ".join([f"{count}x {name}" for name, count in land_distribution.items()])
+            print(f"  ✅ Adding {lands_to_add} lands distributed as: {land_summary}")
+
+        # Add all lands to the deck
+        if lands_to_add_list:
+            self._add_to_deck(lands_to_add_list)
+            print(f"  Final deck size: {self._get_deck_size()} (target: {target_size})")
         else:
-            print(f"  ❌ Could not find {basic_land_name} in database")
-
-        return deck
+            print(f"  ❌ Could not find basic lands in database")
 
     def _remove_cards_intelligently(
         self,
-        deck: List[Dict[str, Any]],
         num_to_remove: int,
         mana_curve: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    ) -> None:
         """
         Remove cards based on mana curve analysis
         Prioritizes removing high CMC cards if curve is too high,
         or low impact cards if curve is good
+        Modifies the protected _deck directly.
 
         Args:
-            deck: Current deck
             num_to_remove: Number of cards to remove
             mana_curve: Mana curve analysis
-
-        Returns:
-            Deck with cards removed
         """
         # Separate lands from non-lands
+        deck = self._get_deck()
         lands = [c for c in deck if 'Land' in c.get('type_line', '')]
         nonlands = [c for c in deck if 'Land' not in c.get('type_line', '')]
 
@@ -608,28 +716,24 @@ class DeckBuilderService:
         for card in cards_removed:
             print(f"    - Removing: {card.get('name')} (CMC: {card.get('cmc', 0)})")
 
-        # Return lands + kept cards
-        return lands + cards_kept
+        # Update the deck with lands + kept cards
+        self._deck = lands + cards_kept
 
     def _remove_excess_lands(
         self,
-        deck: List[Dict[str, Any]],
         land_ratio: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    ) -> None:
         """
         Remove excess lands to reach ideal land ratio
+        Modifies the protected _deck directly.
 
         Args:
-            deck: Current deck
             land_ratio: Land ratio analysis
-
-        Returns:
-            Deck with excess lands removed
         """
         # Calculate how many lands to remove
         current_lands = land_ratio['land_count']
         ideal_max = land_ratio['ideal_percentage'][1] / 100
-        total_cards = len(deck)
+        total_cards = self._get_deck_size()
         target_lands = int(total_cards * ideal_max)
         lands_to_remove = max(0, current_lands - target_lands)
 
@@ -638,13 +742,13 @@ class DeckBuilderService:
         print(f"  Removing: {lands_to_remove} basic lands")
 
         if lands_to_remove == 0:
-            return deck
+            return
 
         # Remove basic lands (prefer removing duplicates)
         lands_removed = 0
         new_deck = []
 
-        for card in deck:
+        for card in self._get_deck():
             is_basic_land = 'Basic Land' in card.get('type_line', '')
             if is_basic_land and lands_removed < lands_to_remove:
                 lands_removed += 1
@@ -652,4 +756,4 @@ class DeckBuilderService:
             new_deck.append(card)
 
         print(f"  ✅ Removed {lands_removed} basic lands")
-        return new_deck
+        self._deck = new_deck

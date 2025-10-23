@@ -43,6 +43,80 @@ class DeckAnalyzer:
     }
 
     @staticmethod
+    def validate_candidate_cards(
+        candidate_cards: List[Dict[str, Any]],
+        current_deck: List[Dict[str, Any]],
+        deck_format: str
+    ) -> Dict[str, Any]:
+        """
+        Validate only candidate cards that are being considered for addition to the deck.
+        Does not re-validate cards already in the deck.
+
+        Args:
+            candidate_cards: List of cards to validate (the 'to_add' list)
+            current_deck: List of already validated cards in the deck
+            deck_format: Format to check legality against (e.g., 'Standard', 'Modern')
+
+        Returns:
+            Dictionary with validation results:
+            {
+                'valid_cards': [...],      # Cards that passed all checks
+                'invalid_cards': [...],    # Cards that failed checks
+                'issues': [...]            # List of issue descriptions
+            }
+        """
+        valid_cards = []
+        invalid_cards = []
+        issues = []
+
+        # Count cards already in deck for 4-copy rule check
+        card_counts = {}
+        for card in current_deck:
+            name = card['name']
+            card_counts[name] = card_counts.get(name, 0) + 1
+
+        # Validate each candidate card
+        for card in candidate_cards:
+            card_name = card['name']
+            is_valid = True
+            card_issues = []
+
+            # Check format legality
+            legalities = card.get('legalities', {})
+            format_key = deck_format.lower()
+            status = legalities.get(format_key, 'not_legal').lower()
+
+            if status not in ['legal', 'legal/gc', 'restricted']:
+                is_valid = False
+                card_issues.append(f"{card_name} is not legal in {deck_format} (status: {status})")
+
+            # Check 4-copy limit (unless it's a basic land)
+            is_basic = 'Basic Land' in card.get('type_line', '') or card_name in ['Mountain', 'Island', 'Plains', 'Swamp', 'Forest', 'Wastes']
+
+            if not is_basic:
+                current_count = card_counts.get(card_name, 0)
+                if current_count >= 4:
+                    is_valid = False
+                    card_issues.append(f"{card_name} already has {current_count} copies in deck (max 4)")
+
+            # Categorize card
+            if is_valid:
+                valid_cards.append(card)
+                # Update count for subsequent cards in the same candidate list
+                card_counts[card_name] = card_counts.get(card_name, 0) + 1
+            else:
+                invalid_cards.append(card)
+                issues.extend(card_issues)
+
+        return {
+            'valid_cards': valid_cards,
+            'invalid_cards': invalid_cards,
+            'issues': issues,
+            'num_valid': len(valid_cards),
+            'num_invalid': len(invalid_cards)
+        }
+
+    @staticmethod
     def analyze_full_deck(cards: List[Dict[str, Any]], archetype: str = 'midrange') -> Dict[str, Any]:
         """
         Comprehensive deck analysis
