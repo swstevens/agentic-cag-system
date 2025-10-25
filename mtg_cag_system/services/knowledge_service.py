@@ -85,7 +85,7 @@ class KnowledgeService:
                 self.__cache.set(cache_key, card.dict(), tier=3, ttl=None)
                 # Track tier 2 hit (database)
                 self.__tier2_hits += 1
-                print(f"📀 Database hit: {name} (cached to L3)")
+                print(f"[DB HIT] Database hit: {name} (cached to L3)")
                 return card
 
         # Not found in cache or database

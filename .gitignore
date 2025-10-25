@@ -176,3 +176,4 @@ data/AllPrintings.json
 .claude/settings.local.json
 data/cards.db
 /.claude
+.claude/settings.local.json

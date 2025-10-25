@@ -1,103 +1,107 @@
-import sqlite3
+"""SQLAlchemy-based database service for MTG cards"""
 import json
+import logging
 from typing import Optional, List, Dict, Any
 from pathlib import Path
+from sqlalchemy import create_engine, select, func, or_, and_, text
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import SQLAlchemyError
+
 from ..models.card import MTGCard, CardColor, CardType
+from ..models.card_orm import CardORM, Base
+from ..models.converters import orm_to_pydantic, pydantic_to_orm, orm_list_to_pydantic
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
-    """SQLite database service for MTG cards"""
+    """SQLAlchemy database service for MTG cards - API-compatible with old version"""
 
     def __init__(self, db_path: str = "./data/cards.db"):
-        # Public: Database path (users may need to access this)
+        # Public: Database path
         self.db_path = db_path
 
-        # Private: Database connection (should not be accessed directly)
-        self.__conn: Optional[sqlite3.Connection] = None
+        # Private: SQLAlchemy engine and session
+        self.__engine = None
+        self.__SessionLocal = None
+        self.__session: Optional[Session] = None
 
     def connect(self):
-        """Connect to SQLite database (Public API)"""
-        self.__conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.__conn.row_factory = sqlite3.Row  # Enable column access by name
-        print(f"✅ Connected to database: {self.db_path}")
+        """Connect to SQLite database using SQLAlchemy"""
+        # Create engine
+        database_url = f"sqlite:///{self.db_path}"
+        self.__engine = create_engine(
+            database_url,
+            echo=False,  # Set to True for SQL debug logging
+            connect_args={"check_same_thread": False}  # Allow multi-threaded access
+        )
+
+        # Create session factory
+        self.__SessionLocal = sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            bind=self.__engine
+        )
+
+        # Create a session
+        self.__session = self.__SessionLocal()
+        logger.info(f"Connected to database: {self.db_path}")
 
     def disconnect(self):
-        """Disconnect from database (Public API)"""
-        if self.__conn:
-            self.__conn.close()
-            print("Disconnected from database")
+        """Disconnect from database"""
+        if self.__session:
+            self.__session.close()
+            self.__session = None
+        if self.__engine:
+            self.__engine.dispose()
+            self.__engine = None
+        logger.info("Disconnected from database")
 
     def initialize_schema(self):
-        """Create tables and indexes if they don't exist (Public API)"""
-        if not self.__conn:
+        """Create tables and indexes if they don't exist"""
+        if not self.__engine:
             raise RuntimeError("Database not connected")
 
-        cursor = self.__conn.cursor()
+        # Create all tables defined in Base metadata
+        Base.metadata.create_all(self.__engine)
 
-        # Create cards table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS cards (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                mana_cost TEXT,
-                cmc REAL DEFAULT 0,
-                colors TEXT,
-                color_identity TEXT,
-                type_line TEXT,
-                types TEXT,
-                subtypes TEXT,
-                oracle_text TEXT,
-                power TEXT,
-                toughness TEXT,
-                loyalty TEXT,
-                set_code TEXT,
-                rarity TEXT,
-                legalities TEXT,
-                keywords TEXT
-            )
-        """)
-
-        # Create indexes for fast lookups
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_name ON cards(name COLLATE NOCASE)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_set ON cards(set_code)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cmc ON cards(cmc)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_rarity ON cards(rarity)")
-
-        # Create full-text search virtual table
-        cursor.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(
-                name,
-                oracle_text,
-                type_line,
-                content=cards,
-                content_rowid=rowid
-            )
-        """)
-
-        self.__conn.commit()
-        print("✅ Database schema initialized")
+        # Create FTS5 virtual table (still using raw SQL as SQLAlchemy doesn't support FTS5)
+        with self.__engine.connect() as conn:
+            conn.execute(text("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(
+                    name,
+                    oracle_text,
+                    type_line,
+                    content=cards,
+                    content_rowid=rowid
+                )
+            """))
+            conn.commit()
+        logger.info("Database schema initialized")
 
     def card_count(self) -> int:
-        """Get total number of cards in database (Public API)"""
-        if not self.__conn:
+        """Get total number of cards in database"""
+        if not self.__session:
             return 0
 
-        cursor = self.__conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM cards")
-        return cursor.fetchone()[0]
+        try:
+            count = self.__session.query(func.count(CardORM.id)).scalar()
+            return count or 0
+        except SQLAlchemyError:
+            return 0
 
     def load_from_mtgjson(self, json_path: str, progress_callback=None):
         """
-        Load cards from MTGJSON AllPrintings.json file (Public API)
+        Load cards from MTGJSON AllPrintings.json file
 
         Args:
             json_path: Path to AllPrintings.json
             progress_callback: Optional function to call with progress updates
         """
-        if not self.__conn:
+        if not self.__session:
             raise RuntimeError("Database not connected")
 
-        print(f"📚 Loading cards from {json_path}...")
+        logger.info(f"Loading cards from {json_path}...")
 
         with open(json_path, 'r', encoding='utf-8') as f:
             json_data = json.load(f)
@@ -105,12 +109,11 @@ class DatabaseService:
         # Extract the 'data' portion (MTGJSON v5 format has meta and data)
         if 'data' in json_data:
             data = json_data['data']
-            print(f"   MTGJSON version: {json_data.get('meta', {}).get('version', 'unknown')}")
+            logger.debug(f"MTGJSON version: {json_data.get('meta', {}).get('version', 'unknown')}")
         else:
             # Fallback for older format
             data = json_data
 
-        cursor = self.__conn.cursor()
         total_cards = 0
         inserted_cards = 0
 
@@ -121,74 +124,59 @@ class DatabaseService:
 
             for card in cards:
                 try:
-                    # Convert card data to our schema
+                    # Convert card data to ORM model
                     card_id = card.get('uuid', f"{set_code}_{card.get('name', 'unknown')}")
 
-                    # Handle colors
-                    colors = card.get('colors', [])
-                    color_identity = card.get('colorIdentity', [])
+                    # Create ORM instance with JSON fields (SQLAlchemy handles serialization)
+                    card_orm = CardORM(
+                        id=card_id,
+                        name=card.get('name'),
+                        mana_cost=card.get('manaCost'),
+                        cmc=card.get('manaValue', 0),
+                        colors=card.get('colors', []),  # Direct list assignment
+                        color_identity=card.get('colorIdentity', []),
+                        type_line=card.get('type'),
+                        types=card.get('types', []),
+                        subtypes=card.get('subtypes', []),
+                        oracle_text=card.get('text'),
+                        power=card.get('power'),
+                        toughness=card.get('toughness'),
+                        loyalty=card.get('loyalty'),
+                        set_code=set_code,
+                        rarity=card.get('rarity'),
+                        legalities=card.get('legalities', {}),
+                        keywords=card.get('keywords', [])
+                    )
 
-                    # Handle types
-                    types = card.get('types', [])
-                    subtypes = card.get('subtypes', [])
-
-                    # Handle legalities
-                    legalities = card.get('legalities', {})
-
-                    # Handle keywords
-                    keywords = card.get('keywords', [])
-
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO cards (
-                            id, name, mana_cost, cmc, colors, color_identity,
-                            type_line, types, subtypes, oracle_text,
-                            power, toughness, loyalty, set_code, rarity,
-                            legalities, keywords
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        card_id,
-                        card.get('name'),
-                        card.get('manaCost'),
-                        card.get('manaValue', 0),  # MTGJSON uses 'manaValue' for CMC
-                        json.dumps(colors),
-                        json.dumps(color_identity),
-                        card.get('type'),
-                        json.dumps(types),
-                        json.dumps(subtypes),
-                        card.get('text'),  # MTGJSON uses 'text' for oracle text
-                        card.get('power'),
-                        card.get('toughness'),
-                        card.get('loyalty'),
-                        set_code,
-                        card.get('rarity'),
-                        json.dumps(legalities),
-                        json.dumps(keywords)
-                    ))
-
+                    # Merge (upsert) the card
+                    self.__session.merge(card_orm)
                     inserted_cards += 1
 
-                    # Progress callback
-                    if progress_callback and inserted_cards % 1000 == 0:
-                        progress_callback(inserted_cards, total_cards)
+                    # Commit in batches for better performance
+                    if inserted_cards % 1000 == 0:
+                        self.__session.commit()
+                        if progress_callback:
+                            progress_callback(inserted_cards, total_cards)
 
                 except Exception as e:
-                    print(f"Error inserting card {card.get('name', 'unknown')}: {e}")
+                    logger.error(f"Error inserting card {card.get('name', 'unknown')}: {e}")
                     continue
 
-        # Commit all inserts
-        self.__conn.commit()
+        # Final commit
+        self.__session.commit()
 
         # Rebuild FTS index
-        print("🔄 Rebuilding full-text search index...")
-        cursor.execute("INSERT INTO cards_fts(cards_fts) VALUES('rebuild')")
-        self.__conn.commit()
+        logger.info("Rebuilding full-text search index...")
+        with self.__engine.connect() as conn:
+            conn.execute(text("INSERT INTO cards_fts(cards_fts) VALUES('rebuild')"))
+            conn.commit()
 
-        print(f"✅ Loaded {inserted_cards} cards from {len(data)} sets")
+        logger.info(f"Loaded {inserted_cards} cards from {len(data)} sets")
         return inserted_cards
 
     def get_card_by_name(self, name: str) -> Optional[MTGCard]:
         """
-        Get a card by exact name (case-insensitive) (Public API)
+        Get a card by exact name (case-insensitive)
 
         Args:
             name: Card name to search for
@@ -196,19 +184,21 @@ class DatabaseService:
         Returns:
             MTGCard object or None if not found
         """
-        if not self.__conn:
+        if not self.__session:
             return None
 
-        cursor = self.__conn.cursor()
-        cursor.execute(
-            "SELECT * FROM cards WHERE LOWER(name) = LOWER(?) LIMIT 1",
-            (name,)
-        )
+        try:
+            # Case-insensitive search using func.lower()
+            card_orm = self.__session.query(CardORM).filter(
+                func.lower(CardORM.name) == func.lower(name)
+            ).first()
 
-        row = cursor.fetchone()
-        if row:
-            return self._row_to_card(row)
-        return None
+            if card_orm:
+                return orm_to_pydantic(card_orm)
+            return None
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching card: {e}")
+            return None
 
     def _normalize_color(self, color: str) -> str:
         """
@@ -220,7 +210,6 @@ class DatabaseService:
         Returns:
             Single-letter color code (W, U, B, R, G, C)
         """
-        # Mapping of color names to codes
         color_map = {
             'white': 'W',
             'blue': 'U',
@@ -230,14 +219,11 @@ class DatabaseService:
             'colorless': 'C'
         }
 
-        # Normalize input
         color_lower = color.lower().strip()
 
-        # If it's already a single character code, return it uppercase
         if len(color) == 1:
             return color.upper()
 
-        # Otherwise, look up in the map
         return color_map.get(color_lower, color.upper())
 
     def search_cards(
@@ -248,162 +234,153 @@ class DatabaseService:
         cmc_min: Optional[float] = None,
         cmc_max: Optional[float] = None,
         rarity: Optional[str] = None,
-        format_legality: Optional[Dict[str, str]] = None,  # e.g. {"standard": "legal"}
-        strict_colors: bool = True,  # Only cards with EXACTLY these colors (no more, no less)
+        format_legality: Optional[Dict[str, str]] = None,
+        strict_colors: bool = True,
         limit: int = 100
     ) -> List[MTGCard]:
         """
-        Search for cards with various filters (Public API)
+        Search for cards with various filters
 
         Args:
             query: Text to search in name/oracle text (uses FTS)
-            colors: List of color codes or names (W/White, U/Blue, B/Black, R/Red, G/Green)
+            colors: List of color codes or names
             types: List of types to filter by
             cmc_min: Minimum CMC
             cmc_max: Maximum CMC
             rarity: Card rarity
-            format_legality: Format and status (e.g. {"standard": "legal"})
-            strict_colors: If True, only return cards with EXACTLY these colors (mono-color decks)
-                          If False, return cards that contain ANY of these colors (multicolor OK)
+            format_legality: Format and status
+            strict_colors: If True, only cards with EXACTLY these colors
             limit: Maximum results to return
 
         Returns:
             List of matching MTGCard objects
         """
-        if not self.__conn:
+        if not self.__session:
             return []
 
-        cursor = self.__conn.cursor()
-
-        # Build SQL query dynamically based on filters
-        if query:
-            # Use full-text search
-            sql = """
-                SELECT cards.* FROM cards
-                JOIN cards_fts ON cards.rowid = cards_fts.rowid
-                WHERE cards_fts MATCH ?
-            """
-            params = [query]
-        else:
-            sql = "SELECT * FROM cards WHERE 1=1"
-            params = []
-
-        # Add filters
-        if colors:
-            # Normalize color names to codes
-            colors = [self._normalize_color(c) for c in colors]
-
-            if strict_colors:
-                # Strict mode for deck building:
-                # - Mono-color: Only cards with EXACTLY that color or colorless
-                # - Multi-color: Cards with ANY COMBINATION of the specified colors (but no other colors)
-                #   Example: Golgari (BG) can have B, G, BG, or colorless - but NOT W, U, or R
-
-                if len(colors) == 1:
-                    # Mono-color: Match cards with exactly this color OR colorless
-                    color = colors[0]
-                    sql += " AND (color_identity LIKE ? OR color_identity = '[]')"
-                    params.append(f'["{color}"]')
-                else:
-                    # Multi-color: Exclude cards that contain colors NOT in our list
-                    # Get the opposite colors (colors we DON'T want)
-                    all_colors = {'W', 'U', 'B', 'R', 'G'}
-                    excluded_colors = all_colors - set(colors)
-
-                    # Add exclusion conditions for each color we don't want
-                    for excluded_color in excluded_colors:
-                        sql += " AND color_identity NOT LIKE ?"
-                        params.append(f'%"{excluded_color}"%')
+        try:
+            # Start with base query
+            if query:
+                # Use FTS for text search (raw SQL required for FTS5)
+                sql = text("""
+                    SELECT cards.* FROM cards
+                    JOIN cards_fts ON cards.rowid = cards_fts.rowid
+                    WHERE cards_fts MATCH :query
+                    LIMIT :limit
+                """)
+                result = self.__session.execute(sql, {"query": query, "limit": limit})
+                # Get all rows and create ORM objects
+                rows = result.fetchall()
+                cards_orm = [CardORM(**dict(zip(result.keys(), row))) for row in rows]
             else:
-                # Loose mode: Cards that contain ANY of the specified colors (multicolor OK)
-                color_conditions = []
-                for color in colors:
-                    color_conditions.append("(colors LIKE ? OR color_identity LIKE ?)")
-                    pattern = f'%"{color}"%'
-                    params.extend([pattern, pattern])
+                # Use SQLAlchemy ORM for filtering
+                stmt = select(CardORM)
 
-                if color_conditions:
-                    sql += " AND (" + " OR ".join(color_conditions) + ")"
+                # Add filters using SQLAlchemy expressions
+                if colors:
+                    colors = [self._normalize_color(c) for c in colors]
 
-        if types:
-            for card_type in types:
-                sql += " AND types LIKE ?"
-                params.append(f'%"{card_type}"%')
+                    if strict_colors:
+                        if len(colors) == 1:
+                            # Mono-color: Match exactly this color OR colorless
+                            color = colors[0]
+                            stmt = stmt.where(
+                                or_(
+                                    CardORM.color_identity == json.dumps([color]),
+                                    CardORM.color_identity == json.dumps([])
+                                )
+                            )
+                        else:
+                            # Multi-color: Exclude unwanted colors
+                            all_colors = {'W', 'U', 'B', 'R', 'G'}
+                            excluded_colors = all_colors - set(colors)
 
-        if cmc_min is not None:
-            sql += " AND cmc >= ?"
-            params.append(cmc_min)
+                            for excluded_color in excluded_colors:
+                                # Use JSON contains check
+                                stmt = stmt.where(
+                                    ~func.json_extract(CardORM.color_identity, '$').contains(f'"{excluded_color}"')
+                                )
+                    else:
+                        # Loose mode: Cards containing ANY of the specified colors
+                        color_filters = []
+                        for color in colors:
+                            color_filters.append(
+                                or_(
+                                    func.json_extract(CardORM.colors, '$').contains(f'"{color}"'),
+                                    func.json_extract(CardORM.color_identity, '$').contains(f'"{color}"')
+                                )
+                            )
+                        if color_filters:
+                            stmt = stmt.where(or_(*color_filters))
 
-        if cmc_max is not None:
-            sql += " AND cmc <= ?"
-            params.append(cmc_max)
+                if types:
+                    for card_type in types:
+                        stmt = stmt.where(
+                            func.json_extract(CardORM.types, '$').contains(f'"{card_type}"')
+                        )
 
-        if rarity:
-            sql += " AND rarity = ?"
-            params.append(rarity)
+                if cmc_min is not None:
+                    stmt = stmt.where(CardORM.cmc >= cmc_min)
 
-        if format_legality:
-            for format_name, status in format_legality.items():
-                # Search in the raw JSON text since it's stored as a string
-                # Legalities are stored as: {"format": "Status"} where format is lowercase
-                # but Status has capital first letter (e.g., "Legal", "Banned", "Not_legal")
-                sql += " AND legalities LIKE ?"
-                # Capitalize the first letter of status to match the stored format
-                status_capitalized = status.capitalize()
-                # Match the exact JSON structure: {"format": "Legal"}
-                params.append(f'%"{format_name.lower()}": "{status_capitalized}"%')
+                if cmc_max is not None:
+                    stmt = stmt.where(CardORM.cmc <= cmc_max)
 
-        sql += f" LIMIT {limit}"
+                if rarity:
+                    stmt = stmt.where(CardORM.rarity == rarity)
 
-        print("\nExecuting SQL Query:")
-        print("SQL:", sql)
-        print("Params:", params)
+                if format_legality:
+                    for format_name, status in format_legality.items():
+                        status_capitalized = status.capitalize()
+                        # Use JSON_EXTRACT for legalities
+                        stmt = stmt.where(
+                            func.json_extract(CardORM.legalities, f'$.{format_name.lower()}') == status_capitalized
+                        )
 
-        cursor.execute(sql, params)
-        rows = cursor.fetchall()
+                stmt = stmt.limit(limit)
 
-        cards = [self._row_to_card(row) for row in rows]
+                # Execute query
+                result = self.__session.execute(stmt)
+                cards_orm = result.scalars().all()
 
-        if colors and strict_colors:
-            if len(colors) == 1:
-                print(f"Found {len(cards)} mono-{colors[0]} cards (including colorless)")
-            else:
-                excluded = sorted(list({'W', 'U', 'B', 'R', 'G'} - set(colors)))
-                print(f"Found {len(cards)} cards (excluding {', '.join(excluded)})")
-        else:
-            print(f"Found {len(cards)} cards")
+            # Convert ORM to Pydantic
+            cards = orm_list_to_pydantic(cards_orm)
+            logger.debug(f"Search returned {len(cards)} cards")
+            return cards
 
-        if len(cards) > 0:
-            print("Sample cards:", ", ".join(c.name for c in cards[:5]))
-
-        return cards
+        except SQLAlchemyError as e:
+            logger.error(f"Error searching cards: {e}")
+            return []
 
     def get_cards_by_format(self, format_name: str, status: str = "legal") -> List[MTGCard]:
         """
         Get all cards that have a specific legality status in a given format
-        
+
         Args:
-            format_name: The format to check (e.g. "standard", "modern", "commander")
-            status: The legality status to look for (e.g. "legal", "not_legal", "banned")
-            
+            format_name: The format to check
+            status: The legality status to look for
+
         Returns:
             List of matching MTGCard objects
         """
-        if not self.__conn:
+        if not self.__session:
             return []
-            
-        cursor = self.__conn.cursor()
-        cursor.execute(
-            "SELECT * FROM cards WHERE JSON_EXTRACT(legalities, ?) = ?",
-            (f"$.{format_name.lower()}", status.lower())
-        )
-        
-        rows = cursor.fetchall()
-        return [self._row_to_card(row) for row in rows]
+
+        try:
+            stmt = select(CardORM).where(
+                func.json_extract(CardORM.legalities, f'$.{format_name.lower()}') == status.capitalize()
+            )
+
+            result = self.__session.execute(stmt)
+            cards_orm = result.scalars().all()
+
+            return orm_list_to_pydantic(cards_orm)
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching cards by format: {e}")
+            return []
 
     def fuzzy_search(self, query: str, limit: int = 10) -> List[MTGCard]:
         """
-        Fuzzy search for cards by name using LIKE (Public API)
+        Fuzzy search for cards by name using LIKE
 
         Args:
             query: Search term
@@ -412,60 +389,18 @@ class DatabaseService:
         Returns:
             List of matching MTGCard objects
         """
-        if not self.__conn:
+        if not self.__session:
             return []
 
-        cursor = self.__conn.cursor()
-
-        # Search with wildcards
-        cursor.execute(
-            "SELECT * FROM cards WHERE name LIKE ? LIMIT ?",
-            (f"%{query}%", limit)
-        )
-
-        rows = cursor.fetchall()
-        return [self._row_to_card(row) for row in rows]
-
-    def _row_to_card(self, row: sqlite3.Row) -> MTGCard:
-        """Convert SQLite row to MTGCard object (Protected - internal helper)"""
-        # Parse JSON fields
-        colors = json.loads(row['colors']) if row['colors'] else []
-        color_identity = json.loads(row['color_identity']) if row['color_identity'] else []
-        types = json.loads(row['types']) if row['types'] else []
-        subtypes = json.loads(row['subtypes']) if row['subtypes'] else []
-        legalities = json.loads(row['legalities']) if row['legalities'] else {}
-        keywords = json.loads(row['keywords']) if row['keywords'] else []
-
-        # Convert to CardColor enums
         try:
-            color_enums = [CardColor(c) for c in colors if c in ['W', 'U', 'B', 'R', 'G', 'C']]
-            color_identity_enums = [CardColor(c) for c in color_identity if c in ['W', 'U', 'B', 'R', 'G', 'C']]
-        except:
-            color_enums = []
-            color_identity_enums = []
+            stmt = select(CardORM).where(
+                CardORM.name.like(f"%{query}%")
+            ).limit(limit)
 
-        # Convert to CardType enums
-        try:
-            type_enums = [CardType(t) for t in types if t in [e.value for e in CardType]]
-        except:
-            type_enums = []
+            result = self.__session.execute(stmt)
+            cards_orm = result.scalars().all()
 
-        return MTGCard(
-            id=row['id'],
-            name=row['name'],
-            mana_cost=row['mana_cost'],
-            cmc=row['cmc'],
-            colors=color_enums,
-            color_identity=color_identity_enums,
-            type_line=row['type_line'] or "",
-            types=type_enums,
-            subtypes=subtypes,
-            oracle_text=row['oracle_text'],
-            power=row['power'],
-            toughness=row['toughness'],
-            loyalty=row['loyalty'],
-            set_code=row['set_code'],
-            rarity=row['rarity'],
-            legalities=legalities,
-            keywords=keywords,
-        )
+            return orm_list_to_pydantic(cards_orm)
+        except SQLAlchemyError as e:
+            logger.error(f"Error in fuzzy search: {e}")
+            return []

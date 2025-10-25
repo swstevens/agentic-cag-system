@@ -24,7 +24,7 @@ from .routers.api import router
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     # Startup: Initialize CAG system
-    print("🚀 Starting MTG CAG System...")
+    print("[STARTUP] Starting MTG CAG System...")
 
     # Initialize cache
     cache = MultiTierCache()
