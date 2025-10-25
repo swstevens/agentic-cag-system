@@ -175,3 +175,4 @@ mtg_cag_system/data/cards.db
 data/AllPrintings.json
 .claude/settings.local.json
 data/cards.db
+/.claude
