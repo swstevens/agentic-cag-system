@@ -9,13 +9,15 @@ This service coordinates agents to build a complete, legal deck through iteratio
 5. Analyze deck quality and apply recommendations (land ratio, mana curve, etc.)
 """
 
+import warnings
 from typing import List, Dict, Any, Optional
 from ..utils.deck_parser import DeckParser
 from ..models.card import MTGCard
 from ..agents.knowledge_fetch_agent import KnowledgeFetchAgent
 from ..agents.symbolic_reasoning_agent import SymbolicReasoningAgent
+from ..agents.deck_analyzer_agent import DeckAnalyzerAgent
 from .card_lookup_service import CardLookupService
-from .deck_analyzer import DeckAnalyzer
+from .deck_analyzer import DeckAnalyzer  # Legacy - deprecated
 
 
 class DeckBuilderService:
@@ -44,6 +46,7 @@ class DeckBuilderService:
         knowledge_agent: KnowledgeFetchAgent,
         symbolic_agent: SymbolicReasoningAgent,
         card_lookup: CardLookupService,
+        analyzer_agent: Optional[DeckAnalyzerAgent] = None,
         max_iterations: int = 10
     ):
         """
@@ -53,12 +56,27 @@ class DeckBuilderService:
             knowledge_agent: Agent for fetching cards
             symbolic_agent: Agent for validation
             card_lookup: Direct card lookup service
+            analyzer_agent: Optional DeckAnalyzerAgent for quality analysis.
+                          If None, falls back to deprecated legacy DeckAnalyzer.
+                          ⚠️  Providing DeckAnalyzerAgent is strongly recommended.
             max_iterations: Maximum iteration attempts
         """
         self.knowledge_agent = knowledge_agent
         self.symbolic_agent = symbolic_agent
         self.card_lookup = card_lookup
+        self.analyzer_agent = analyzer_agent
         self.max_iterations = max_iterations
+
+        # Warn if using legacy fallback
+        if analyzer_agent is None:
+            warnings.warn(
+                "No DeckAnalyzerAgent provided to DeckBuilderService. "
+                "Falling back to deprecated legacy DeckAnalyzer. "
+                "Please provide a DeckAnalyzerAgent instance for better analysis. "
+                "See ANALYZER_MIGRATION_GUIDE.md for migration instructions.",
+                DeprecationWarning,
+                stacklevel=2
+            )
 
         # Protected deck state (initialized in build_deck)
         self._deck = []
@@ -533,7 +551,7 @@ class DeckBuilderService:
         target_size: int
     ) -> None:
         """
-        Analyze deck quality and apply recommendations from DeckAnalyzer
+        Analyze deck quality and apply recommendations from DeckAnalyzerAgent
         Maintains exactly target_size cards by removing cards when adding lands
         Modifies the protected _deck directly.
 
@@ -543,35 +561,112 @@ class DeckBuilderService:
             deck_format: Format (Standard, Modern, etc.)
             target_size: Exact deck size to maintain (60 for Standard, 100 for Commander, etc.)
         """
-        # Run deck analysis
-        analysis = DeckAnalyzer.analyze_full_deck(self._get_deck(), archetype)
+        # Run deck analysis using agent or fallback to legacy analyzer
+        if self.analyzer_agent:
+            print("\n🤖 Using DeckAnalyzerAgent (LLM-based analysis)...")
+            analysis = await self.analyzer_agent.analyze_full_deck(
+                cards=self._get_deck(),
+                archetype=archetype,
+                deck_format=deck_format,
+                deck_size=target_size
+            )
+        else:
+            print("\n📊 Using legacy DeckAnalyzer (rule-based analysis)...")
+            analysis = DeckAnalyzer.analyze_full_deck(self._get_deck(), archetype)
 
         print(f"\nDeck Analysis Results:")
         print(f"  Overall Score: {analysis['overall_score']}/100")
-        print(f"  Land Ratio: {analysis['land_ratio']['land_percentage']}% ({analysis['land_ratio']['ratio_quality']})")
-        print(f"  Average CMC: {analysis['mana_curve']['average_cmc']:.2f}")
-        print(f"  Recommendations: {len(analysis['recommendations'])}")
 
-        for rec in analysis['recommendations']:
-            print(f"    - {rec}")
+        # Handle both new agent format and old format
+        if 'land_ratio' in analysis:
+            land_ratio = analysis['land_ratio']
+            if isinstance(land_ratio, dict):
+                land_pct = land_ratio.get('land_percentage', 0)
+                ratio_quality = land_ratio.get('ratio_quality', 'unknown')
+            else:
+                # New format from DeckAnalyzerAgent
+                land_pct = land_ratio.land_percentage if hasattr(land_ratio, 'land_percentage') else 0
+                ratio_quality = land_ratio.ratio_quality if hasattr(land_ratio, 'ratio_quality') else 'unknown'
+            print(f"  Land Ratio: {land_pct}% ({ratio_quality})")
+
+        if 'mana_curve' in analysis:
+            mana_curve = analysis['mana_curve']
+            if isinstance(mana_curve, dict):
+                avg_cmc = mana_curve.get('average_cmc', 0)
+            else:
+                avg_cmc = mana_curve.average_cmc if hasattr(mana_curve, 'average_cmc') else 0
+            print(f"  Average CMC: {avg_cmc:.2f}")
+
+        # Print priority improvements if using new agent
+        if 'priority_improvements' in analysis:
+            priority_improvements = analysis.get('priority_improvements', [])
+            if priority_improvements:
+                print(f"  Priority Improvements:")
+                for imp in priority_improvements[:5]:  # Top 5
+                    print(f"    - {imp}")
+        elif 'recommendations' in analysis:
+            # Legacy format
+            recommendations = analysis.get('recommendations', [])
+            if recommendations:
+                print(f"  Recommendations: {len(recommendations)}")
+                for rec in recommendations:
+                    print(f"    - {rec}")
 
         # Apply land ratio fixes while maintaining exact deck size
-        land_ratio = analysis['land_ratio']
-        mana_curve = analysis['mana_curve']
+        # Convert to dict format for backward compatibility with helper methods
+        if 'land_ratio' in analysis:
+            land_ratio_dict = self._normalize_land_ratio(analysis['land_ratio'])
+            mana_curve_dict = self._normalize_mana_curve(analysis['mana_curve'])
 
-        if land_ratio['ratio_quality'] == 'too_few_lands':
-            print(f"\n⚠️  Too few lands! Adding basic lands and removing cards...")
-            await self._add_basic_lands_and_remove_cards(
-                colors, land_ratio, mana_curve, deck_format, target_size
-            )
-        elif land_ratio['ratio_quality'] == 'too_many_lands':
-            print(f"\n⚠️  Too many lands! Removing excess lands...")
-            self._remove_excess_lands(land_ratio)
+            ratio_quality = land_ratio_dict.get('ratio_quality', 'good')
 
-        # Re-analyze after improvements
-        final_analysis = DeckAnalyzer.analyze_full_deck(self._get_deck(), archetype)
-        print(f"\nFinal Land Ratio: {final_analysis['land_ratio']['land_percentage']}% ({final_analysis['land_ratio']['ratio_quality']})")
-        print(f"Final Score: {final_analysis['overall_score']}/100")
+            if 'too_few' in ratio_quality.lower():
+                print(f"\n⚠️  Too few lands! Adding basic lands and removing cards...")
+                await self._add_basic_lands_and_remove_cards(
+                    colors, land_ratio_dict, mana_curve_dict, deck_format, target_size
+                )
+            elif 'too_many' in ratio_quality.lower():
+                print(f"\n⚠️  Too many lands! Removing excess lands...")
+                self._remove_excess_lands(land_ratio_dict)
+
+            # Re-analyze after improvements
+            if self.analyzer_agent:
+                final_analysis = await self.analyzer_agent.analyze_full_deck(
+                    cards=self._get_deck(),
+                    archetype=archetype,
+                    deck_format=deck_format,
+                    deck_size=target_size
+                )
+            else:
+                final_analysis = DeckAnalyzer.analyze_full_deck(self._get_deck(), archetype)
+
+            final_land_ratio = self._normalize_land_ratio(final_analysis['land_ratio'])
+            print(f"\nFinal Land Ratio: {final_land_ratio['land_percentage']}% ({final_land_ratio['ratio_quality']})")
+            print(f"Final Score: {final_analysis['overall_score']}/100")
+
+    def _normalize_land_ratio(self, land_ratio: Any) -> Dict[str, Any]:
+        """Convert land_ratio to dict format for backward compatibility"""
+        if isinstance(land_ratio, dict):
+            return land_ratio
+        # Convert Pydantic model to dict
+        return {
+            'land_count': land_ratio.land_count,
+            'land_percentage': land_ratio.land_percentage,
+            'ratio_quality': land_ratio.ratio_quality,
+            'recommended_land_count': land_ratio.recommended_land_count,
+            'ideal_percentage': (35.0, 45.0) if land_ratio.recommended_land_count else (38.0, 45.0)
+        }
+
+    def _normalize_mana_curve(self, mana_curve: Any) -> Dict[str, Any]:
+        """Convert mana_curve to dict format for backward compatibility"""
+        if isinstance(mana_curve, dict):
+            return mana_curve
+        # Convert Pydantic model to dict
+        return {
+            'average_cmc': mana_curve.average_cmc,
+            'curve_quality': mana_curve.curve_quality,
+            'curve': mana_curve.curve_distribution if hasattr(mana_curve, 'curve_distribution') else {}
+        }
 
     async def _add_basic_lands_and_remove_cards(
         self,

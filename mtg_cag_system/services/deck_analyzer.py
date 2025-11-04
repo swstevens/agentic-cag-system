@@ -1,5 +1,13 @@
 """
-Deck Analyzer Service
+Deck Analyzer Service (DEPRECATED)
+
+⚠️ DEPRECATED: This legacy rule-based analyzer is deprecated in favor of
+DeckAnalyzerAgent (LLM-based analysis) wrapped by LLMDeckAnalyzer.
+
+Use `mtg_cag_system.analyzers.LLMDeckAnalyzer` instead for better analysis.
+
+This class is kept for backward compatibility with existing tests and will
+be removed in a future version.
 
 Advanced deck analysis including:
 - Mana curve analysis
@@ -9,14 +17,28 @@ Advanced deck analysis including:
 - Archetype consistency
 """
 
+import warnings
 from typing import Dict, Any, List, Tuple
 from collections import Counter
 
 
 class DeckAnalyzer:
     """
-    Analyze deck construction quality beyond basic legality
+    Analyze deck construction quality beyond basic legality.
+
+    ⚠️ DEPRECATED: Use LLMDeckAnalyzer instead.
+
+    This class uses rule-based heuristics which are less accurate than
+    the LLM-based DeckAnalyzerAgent. Kept for backward compatibility only.
     """
+
+    def __init__(self):
+        warnings.warn(
+            "DeckAnalyzer is deprecated. Use LLMDeckAnalyzer (wraps DeckAnalyzerAgent) "
+            "for more accurate LLM-based analysis.",
+            DeprecationWarning,
+            stacklevel=2
+        )
 
     # Archetype-specific recommendations
     ARCHETYPE_CURVES = {
