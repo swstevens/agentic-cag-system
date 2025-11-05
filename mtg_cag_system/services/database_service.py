@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..models.card import MTGCard, CardColor, CardType
-from ..models.card_orm import CardORM, Base
+from ..models.card_orm import CardORM, CardLegalitiesORM, Base
 from ..models.converters import orm_to_pydantic, pydantic_to_orm, orm_list_to_pydantic
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,44 @@ class DatabaseService:
             self.__engine.dispose()
             self.__engine = None
         logger.info("Disconnected from database")
+
+    def __attach_legalities(self, cards_orm: List[CardORM]) -> List[CardORM]:
+        """
+        Fetch and attach legalities to a list of CardORM objects
+
+        Args:
+            cards_orm: List of CardORM objects
+
+        Returns:
+            Same list with legalities attached (modifies in place)
+        """
+        if not self.__session or not cards_orm:
+            return cards_orm
+
+        try:
+            # Get all UUIDs from the cards
+            uuids = [card.id for card in cards_orm]
+
+            # Fetch legalities for all cards in one query
+            legalities_query = self.__session.query(CardLegalitiesORM).filter(
+                CardLegalitiesORM.uuid.in_(uuids)
+            ).all()
+
+            # Create a mapping of uuid -> legalities dict
+            legalities_map = {leg.uuid: leg.to_dict() for leg in legalities_query}
+
+            # Attach legalities to each card
+            for card in cards_orm:
+                # Store legalities as a temporary attribute that to_dict() can use
+                card._legalities = legalities_map.get(card.id, {})
+
+        except SQLAlchemyError as e:
+            logger.error(f"Error fetching legalities: {e}")
+            # Set empty legalities on error
+            for card in cards_orm:
+                card._legalities = {}
+
+        return cards_orm
 
     def initialize_schema(self):
         """Create tables and indexes if they don't exist"""
@@ -194,6 +232,8 @@ class DatabaseService:
             ).first()
 
             if card_orm:
+                # Attach legalities before converting to Pydantic
+                self.__attach_legalities([card_orm])
                 return orm_to_pydantic(card_orm)
             return None
         except SQLAlchemyError as e:
@@ -277,6 +317,7 @@ class DatabaseService:
                 stmt = select(CardORM)
 
                 # Add filters using SQLAlchemy expressions
+                # MTGJSON stores lists as comma-separated strings, use LIKE for filtering
                 if colors:
                     colors = [self._normalize_color(c) for c in colors]
 
@@ -286,19 +327,23 @@ class DatabaseService:
                             color = colors[0]
                             stmt = stmt.where(
                                 or_(
-                                    CardORM.color_identity == json.dumps([color]),
-                                    CardORM.color_identity == json.dumps([])
+                                    CardORM.color_identity == color,
+                                    CardORM.color_identity == None,
+                                    CardORM.color_identity == ''
                                 )
                             )
                         else:
-                            # Multi-color: Exclude unwanted colors
+                            # Multi-color: Exclude unwanted colors using NOT LIKE
                             all_colors = {'W', 'U', 'B', 'R', 'G'}
                             excluded_colors = all_colors - set(colors)
 
                             for excluded_color in excluded_colors:
-                                # Use JSON contains check
+                                # MTGJSON stores as comma-separated: "W,U,B"
                                 stmt = stmt.where(
-                                    ~func.json_extract(CardORM.color_identity, '$').contains(f'"{excluded_color}"')
+                                    or_(
+                                        CardORM.color_identity.notlike(f'%{excluded_color}%'),
+                                        CardORM.color_identity == None
+                                    )
                                 )
                     else:
                         # Loose mode: Cards containing ANY of the specified colors
@@ -306,8 +351,8 @@ class DatabaseService:
                         for color in colors:
                             color_filters.append(
                                 or_(
-                                    func.json_extract(CardORM.colors, '$').contains(f'"{color}"'),
-                                    func.json_extract(CardORM.color_identity, '$').contains(f'"{color}"')
+                                    CardORM.colors.like(f'%{color}%'),
+                                    CardORM.color_identity.like(f'%{color}%')
                                 )
                             )
                         if color_filters:
@@ -315,8 +360,9 @@ class DatabaseService:
 
                 if types:
                     for card_type in types:
+                        # MTGJSON stores types as comma-separated strings
                         stmt = stmt.where(
-                            func.json_extract(CardORM.types, '$').contains(f'"{card_type}"')
+                            CardORM.types.like(f'%{card_type}%')
                         )
 
                 if cmc_min is not None:
@@ -329,18 +375,24 @@ class DatabaseService:
                     stmt = stmt.where(CardORM.rarity == rarity)
 
                 if format_legality:
+                    # JOIN with cardLegalities table to filter by format legality
+                    stmt = stmt.join(CardLegalitiesORM, CardORM.id == CardLegalitiesORM.uuid)
                     for format_name, status in format_legality.items():
+                        # MTGJSON stores legalities with capital first letter (e.g., "Legal", "NotLegal")
                         status_capitalized = status.capitalize()
-                        # Use JSON_EXTRACT for legalities
-                        stmt = stmt.where(
-                            func.json_extract(CardORM.legalities, f'$.{format_name.lower()}') == status_capitalized
-                        )
+                        # Get the column for the format (e.g., getattr(CardLegalitiesORM, 'standard'))
+                        format_column = getattr(CardLegalitiesORM, format_name.lower(), None)
+                        if format_column is not None:
+                            stmt = stmt.where(format_column == status_capitalized)
 
                 stmt = stmt.limit(limit)
 
                 # Execute query
                 result = self.__session.execute(stmt)
                 cards_orm = result.scalars().all()
+
+            # Attach legalities to all cards before converting
+            self.__attach_legalities(cards_orm)
 
             # Convert ORM to Pydantic
             cards = orm_list_to_pydantic(cards_orm)
@@ -366,14 +418,15 @@ class DatabaseService:
             return []
 
         try:
-            stmt = select(CardORM).where(
-                func.json_extract(CardORM.legalities, f'$.{format_name.lower()}') == status.capitalize()
-            )
+            # TODO: MTGJSON stores legalities in separate cardLegalities table
+            # Would need to implement JOIN with cardLegalities table
+            logger.warning("get_cards_by_format not yet supported with MTGJSON schema - requires JOIN")
+            return []
 
-            result = self.__session.execute(stmt)
-            cards_orm = result.scalars().all()
-
-            return orm_list_to_pydantic(cards_orm)
+            # stmt = select(CardORM).join(...)  # Need to add CardLegalitiesORM
+            # result = self.__session.execute(stmt)
+            # cards_orm = result.scalars().all()
+            # return orm_list_to_pydantic(cards_orm)
         except SQLAlchemyError as e:
             logger.error(f"Error fetching cards by format: {e}")
             return []
@@ -399,6 +452,9 @@ class DatabaseService:
 
             result = self.__session.execute(stmt)
             cards_orm = result.scalars().all()
+
+            # Attach legalities before converting
+            self.__attach_legalities(cards_orm)
 
             return orm_list_to_pydantic(cards_orm)
         except SQLAlchemyError as e:

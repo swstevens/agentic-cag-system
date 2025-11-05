@@ -59,8 +59,8 @@ async def get_card(
     Returns:
         MTGCard model with full card details
     """
-    knowledge_service = orchestrator.knowledge_agent.knowledge_service
-    card = knowledge_service.get_card_by_name(card_name)
+    card_lookup = orchestrator.knowledge_agent.card_lookup
+    card = card_lookup.get_card(card_name)
 
     if not card:
         raise HTTPException(status_code=404, detail=f"Card '{card_name}' not found")
@@ -90,15 +90,24 @@ async def search_cards(
     Returns:
         List of matching MTGCard models
     """
-    knowledge_service = orchestrator.knowledge_agent.knowledge_service
+    card_lookup = orchestrator.knowledge_agent.card_lookup
 
-    filters = {}
-    if colors:
-        filters["colors"] = colors
-    if types:
-        filters["types"] = types
+    # If query is provided, use fuzzy search
+    if query:
+        cards = card_lookup.fuzzy_search(query, limit=limit)
+    # If filters are provided without query, use database service directly
+    elif card_lookup._CardLookupService__database:
+        # Access the database service for filtered searches
+        db = card_lookup._CardLookupService__database
+        cards = db.search_cards(
+            query="",
+            colors=colors,
+            types=types,
+            limit=limit
+        )
+    else:
+        cards = []
 
-    cards = knowledge_service.search_cards(query, filters)
     return cards[:limit]
 
 
