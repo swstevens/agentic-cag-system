@@ -8,54 +8,53 @@ Base = declarative_base()
 
 
 class CardORM(Base):
-    """SQLAlchemy ORM model for MTG cards table - mapped to MTGJSON schema"""
+    """SQLAlchemy ORM model for MTG cards table - works with AtomicCards database"""
     __tablename__ = 'cards'
 
-    # Primary key - MTGJSON uses 'uuid' as primary key
-    id = Column('uuid', String, primary_key=True, key='id')
+    # Primary key
+    id = Column('uuid', String, primary_key=True)
 
     # Basic card information
     name = Column(String, nullable=False)
-    mana_cost = Column('manaCost', String, nullable=True, key='mana_cost')
-    cmc = Column('manaValue', Float, default=0.0, key='cmc')
+    mana_cost = Column(String, nullable=True)
+    cmc = Column(Float, default=0.0)
 
-    # JSON columns for complex data types
-    # MTGJSON stores these as TEXT (JSON strings), SQLAlchemy will handle conversion
-    colors = Column('colors', String, nullable=True, key='colors')  # Stored as comma-separated string
-    color_identity = Column('colorIdentity', String, nullable=True, key='color_identity')
+    # Colors - stored as comma-separated strings
+    colors = Column(String, nullable=True)
+    color_identity = Column(String, nullable=True)
 
     # Type information
-    type_line = Column('type', String, nullable=True, key='type_line')
-    types = Column('types', String, nullable=True, key='types')  # Stored as comma-separated string
-    subtypes = Column('subtypes', String, nullable=True, key='subtypes')  # Stored as comma-separated string
+    type_line = Column(String, nullable=True)
+    types = Column(String, nullable=True)
+    subtypes = Column(String, nullable=True)
+    supertypes = Column(String, nullable=True)
 
-    # Card text and attributes - MTGJSON uses 'text' not 'oracle_text'
-    oracle_text = Column('text', String, nullable=True, key='oracle_text')
+    # Card text and attributes
+    oracle_text = Column(String, nullable=True)
     power = Column(String, nullable=True)
     toughness = Column(String, nullable=True)
     loyalty = Column(String, nullable=True)
 
-    # Set and rarity
-    set_code = Column('setCode', String, nullable=True, key='set_code')
-    rarity = Column(String, nullable=True)
+    # Keywords - comma-separated
+    keywords = Column(String, nullable=True)
 
-    # Keywords - MTGJSON stores as TEXT (comma-separated)
-    keywords = Column('keywords', String, nullable=True, key='keywords')
+    # AtomicCards-specific fields
+    layout = Column(String, nullable=True)
+    first_printing = Column(String, nullable=True)
 
-    # Note: Legalities are in a separate table in MTGJSON
+    # Note: Legalities are in a separate table
     # We'll handle this in the database service layer
 
-    # Define indexes - reference the Column objects, not the database column names
-    # Note: MTGJSON database already has indexes, but we define them for completeness
+    # Define indexes
     __table_args__ = (
         Index('idx_name', name),
-        Index('idx_setCode', set_code),
-        Index('idx_manaValue', cmc),
-        Index('idx_rarity', rarity),
+        Index('idx_types', types),
+        Index('idx_colors', color_identity),
+        Index('idx_cmc', cmc),
     )
 
     def __repr__(self):
-        return f"<CardORM(id='{self.id}', name='{self.name}', set='{self.set_code}')>"
+        return f"<CardORM(id='{self.id}', name='{self.name}')>"
 
     def to_dict(self) -> dict:
         """Convert ORM model to dictionary for Pydantic conversion"""
@@ -83,8 +82,8 @@ class CardORM(Base):
             'power': self.power,
             'toughness': self.toughness,
             'loyalty': self.loyalty,
-            'set_code': self.set_code or '',
-            'rarity': self.rarity or '',
+            'set_code': getattr(self, 'first_printing', None) or '',  # Use first_printing for AtomicCards
+            'rarity': '',  # Not available in AtomicCards
             'legalities': legalities,
             'keywords': parse_list(self.keywords),
         }

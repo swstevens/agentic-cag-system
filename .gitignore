@@ -177,3 +177,8 @@ data/AllPrintings.json
 data/cards.db
 /.claude
 .claude/settings.local.json
+
+# AtomicCards database and vector embeddings
+data/AtomicCards.json
+data/cards_atomic.db
+data/chroma/

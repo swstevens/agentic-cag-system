@@ -22,6 +22,7 @@ class CardType(str, Enum):
     PLANESWALKER = "Planeswalker"
     LAND = "Land"
     BATTLE = "Battle"
+    KINDRED = "Kindred"  # Formerly "Tribal"
 
 
 class MTGCard(BaseModel):
@@ -33,14 +34,14 @@ class MTGCard(BaseModel):
     colors: List[CardColor] = Field(default_factory=list)
     color_identity: List[CardColor] = Field(default_factory=list)
     type_line: str = Field(..., description="Full type line")
-    types: List[CardType] = Field(default_factory=list)
+    types: List[str] = Field(default_factory=list)  # Changed from List[CardType] to List[str] for flexibility
     subtypes: List[str] = Field(default_factory=list)
     oracle_text: Optional[str] = Field(None, description="Rules text")
     power: Optional[str] = Field(None, description="Creature power")
     toughness: Optional[str] = Field(None, description="Creature toughness")
     loyalty: Optional[str] = Field(None, description="Planeswalker loyalty")
-    set_code: str = Field(..., description="Set code")
-    rarity: str = Field(..., description="Card rarity")
+    set_code: str = Field(default="", description="Set code")  # Made optional with default for AtomicCards
+    rarity: str = Field(default="", description="Card rarity")  # Made optional with default for AtomicCards
     legalities: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
 

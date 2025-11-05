@@ -276,7 +276,8 @@ class DatabaseService:
         rarity: Optional[str] = None,
         format_legality: Optional[Dict[str, str]] = None,
         strict_colors: bool = True,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0
     ) -> List[MTGCard]:
         """
         Search for cards with various filters
@@ -291,6 +292,7 @@ class DatabaseService:
             format_legality: Format and status
             strict_colors: If True, only cards with EXACTLY these colors
             limit: Maximum results to return
+            offset: Number of results to skip (for pagination)
 
         Returns:
             List of matching MTGCard objects
@@ -306,9 +308,9 @@ class DatabaseService:
                     SELECT cards.* FROM cards
                     JOIN cards_fts ON cards.rowid = cards_fts.rowid
                     WHERE cards_fts MATCH :query
-                    LIMIT :limit
+                    LIMIT :limit OFFSET :offset
                 """)
-                result = self.__session.execute(sql, {"query": query, "limit": limit})
+                result = self.__session.execute(sql, {"query": query, "limit": limit, "offset": offset})
                 # Get all rows and create ORM objects
                 rows = result.fetchall()
                 cards_orm = [CardORM(**dict(zip(result.keys(), row))) for row in rows]
@@ -385,7 +387,7 @@ class DatabaseService:
                         if format_column is not None:
                             stmt = stmt.where(format_column == status_capitalized)
 
-                stmt = stmt.limit(limit)
+                stmt = stmt.limit(limit).offset(offset)
 
                 # Execute query
                 result = self.__session.execute(stmt)
