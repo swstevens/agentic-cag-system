@@ -20,6 +20,8 @@ from ..interfaces.analyzer import IAnalyzer, AnalysisContext
 from ..interfaces.validator import IValidator, ValidationRules
 from ..models.card import MTGCard, CardColor
 from ..models.deck_analysis import DeckAnalysisResult
+from .vector_store_service import VectorStoreService
+from .vector_card_selector import VectorCardSelector
 
 
 class DeckBuilderServiceV2:
@@ -50,7 +52,8 @@ class DeckBuilderServiceV2:
         repository: ICardRepository,
         analyzer: IAnalyzer,
         validator: Optional[IValidator] = None,
-        max_iterations: int = 10
+        max_iterations: int = 10,
+        vector_store: Optional[VectorStoreService] = None
     ):
         """
         Initialize deck builder with interface dependencies.
@@ -60,11 +63,16 @@ class DeckBuilderServiceV2:
             analyzer: Deck analyzer for quality analysis (implements IAnalyzer)
             validator: Optional validator for legality checks (implements IValidator)
             max_iterations: Maximum build iterations
+            vector_store: Optional VectorStoreService for synergy-based card selection
         """
         self.repository = repository
         self.analyzer = analyzer
         self.validator = validator
         self.max_iterations = max_iterations
+
+        # Vector search for synergy detection
+        self.vector_store = vector_store
+        self.vector_selector = VectorCardSelector(vector_store) if vector_store else None
 
         # Deck state
         self._deck: List[MTGCard] = []
@@ -198,6 +206,8 @@ class DeckBuilderServiceV2:
         """
         Score and select best cards for archetype.
 
+        Optionally uses vector search for synergy-based selection if vector_store is available.
+
         Args:
             cards: Available cards
             archetype: Deck archetype
@@ -206,9 +216,28 @@ class DeckBuilderServiceV2:
         Returns:
             Best cards for the archetype
         """
-        # Score each card based on archetype
+        # Get archetype keywords
         archetype_keywords = self._get_archetype_keywords(archetype)
 
+        # If we have vector store and deck cards, use synergy-based selection
+        if self.vector_selector and len(self._deck) > 0:
+            try:
+                selected = self.vector_selector.select_synergistic_cards(
+                    current_deck=self._deck,
+                    available_cards=cards,
+                    archetype=archetype,
+                    archetype_keywords=archetype_keywords,
+                    needed=needed,
+                    similarity_weight=0.4,  # Weight synergy
+                    archetype_weight=0.6,   # Weight archetype adherence
+                )
+                print(f"Using vector-enhanced selection: {len(selected)} cards selected by synergy")
+                return selected
+            except Exception as e:
+                print(f"⚠️  Vector selection failed: {e}, falling back to keyword scoring")
+                # Fall back to traditional scoring if vector search fails
+
+        # Traditional scoring based on archetype keywords
         scored_cards = []
         for card in cards:
             score = self._score_card(card, archetype_keywords)

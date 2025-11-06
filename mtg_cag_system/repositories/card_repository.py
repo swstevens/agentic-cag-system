@@ -99,8 +99,17 @@ class CardRepository(ICardRepository):
 
         filters["limit"] = criteria.limit
 
-        # Query database
-        cards = self.database.search_cards(filters)
+        # Query database with unpacked filters
+        cards = self.database.search_cards(
+            query=filters.get("text"),
+            colors=filters.get("colors"),
+            types=filters.get("types"),
+            cmc_min=filters.get("cmc_min"),
+            cmc_max=filters.get("cmc_max"),
+            rarity=filters.get("rarity"),
+            format_legality={"standard": "legal"} if filters.get("format") == "Standard" else None,
+            limit=filters.get("limit", 100)
+        )
 
         # Optionally: preload popular cards into cache
         # This could be a background task or strategic caching
