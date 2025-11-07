@@ -1,0 +1,441 @@
+---
+title: MTG CAG System - Architecture Diagram
+---
+
+classDiagram
+    %% ============================================================================
+    %% BASE AGENT HIERARCHY
+    %% ============================================================================
+    class BaseAgent {
+        <<abstract>>
+        #agent_id: str
+        #agent_type: AgentType
+        #state: AgentState
+        #_pydantic_agent: Optional[PydanticAgent]
+        +process(input_data: Dict)* AgentResponse
+        +update_state(status: str, task: str)
+        +get_state() AgentState
+    }
+
+    class SchedulingAgent {
+        -model: str
+        +process(input_data: Dict) AgentResponse
+        -_extract_requirements(query: str) Dict
+        -_classify_query_type(query: str) QueryType
+    }
+
+    class KnowledgeFetchAgent {
+        -card_lookup_service: CardLookupService
+        -model: str
+        +process(input_data: Dict) AgentResponse
+        -_extract_card_names(query: str) List[str]
+        -_lookup_cards(card_names: List[str]) List[MTGCard]
+    }
+
+    class SymbolicReasoningAgent {
+        -model: str
+        +process(input_data: Dict) AgentResponse
+        -_validate_deck_legality(cards: List[MTGCard]) bool
+        -_analyze_mana_curve(cards: List[MTGCard]) Dict
+        -_check_card_interactions(cards: List[MTGCard]) List[str]
+    }
+
+    class DeckAnalyzerAgent {
+        -model: str
+        +process(input_data: Dict) AgentResponse
+        -_analyze_with_llm(cards: List[MTGCard]) DeckAnalysisResult
+    }
+
+    BaseAgent <|-- SchedulingAgent
+    BaseAgent <|-- KnowledgeFetchAgent
+    BaseAgent <|-- SymbolicReasoningAgent
+    BaseAgent <|-- DeckAnalyzerAgent
+
+    %% ============================================================================
+    %% SERVICE LAYER
+    %% ============================================================================
+    class DatabaseService {
+        -engine: Engine
+        -session_factory: sessionmaker
+        -db_path: str
+        +connect()
+        +disconnect()
+        +get_card_by_name(name: str) Optional[MTGCard]
+        +search_cards(filters: Dict) List[MTGCard]
+        +fuzzy_search(name: str) List[MTGCard]
+        +load_from_mtgjson(file_path: str)
+        -_create_tables()
+        -_create_fts_index()
+    }
+
+    class CAGCache {
+        -cache: OrderedDict
+        -max_size: int
+        -access_counts: Dict[str, int]
+        +get(card_name: str) Optional[MTGCard]
+        +put(card: MTGCard)
+        +preload_format_cards(format: str, limit: int)
+        +get_context_string() str
+        +get_stats() Dict
+        -_evict_lru()
+    }
+
+    class MultiTierCache {
+        -l1_cache: Dict
+        -l2_cache: Dict
+        -l3_cache: Dict
+        -l1_max: int
+        -l2_max: int
+        -l3_max: int
+        +get(key: str, tier: str) Optional[Any]
+        +set(key: str, value: Any, tier: str, ttl: int)
+        -_promote_to_l1(key: str)
+        -_evict_from_tier(tier: str)
+    }
+
+    class CardLookupService {
+        -cag_cache: CAGCache
+        -database_service: DatabaseService
+        +get_card(name: str) Optional[MTGCard]
+        +fuzzy_search(name: str) List[MTGCard]
+        +preload_cards(format: str, limit: int)
+        +preload_by_names(names: List[str])
+        +get_stats() Dict
+    }
+
+    class KnowledgeService {
+        -cag_cache: CAGCache
+        -multi_tier_cache: MultiTierCache
+        -database_service: DatabaseService
+        +preload_knowledge(format: str)
+        +get_card_by_name(name: str) Optional[MTGCard]
+        +search_cards(filters: Dict) List[MTGCard]
+    }
+
+    class DeckBuilderService {
+        -knowledge_agent: KnowledgeFetchAgent
+        -symbolic_agent: SymbolicReasoningAgent
+        -card_lookup_service: CardLookupService
+        -deck_analyzer_agent: Optional[DeckAnalyzerAgent]
+        -deck_analyzer: DeckAnalyzer
+        +build_deck(requirements: Dict) Dict
+        -_fetch_cards_for_requirements(requirements: Dict) List[MTGCard]
+        -_distribute_lands_by_color(colors: List, count: int) List[MTGCard]
+        -_improve_deck_quality(deck: List[MTGCard]) List[MTGCard]
+        -_remove_cards_intelligently(deck: List[MTGCard], count: int) List[MTGCard]
+    }
+
+    class DeckAnalyzer {
+        -card_lookup_service: CardLookupService
+        +validate_candidate_cards(cards: List[MTGCard], format: str) Tuple
+        +analyze_full_deck(cards: List[MTGCard], archetype: str) Dict
+        -_check_format_legality(cards: List[MTGCard], format: str) List[MTGCard]
+        -_check_card_limits(cards: List[MTGCard]) List[MTGCard]
+        -_analyze_mana_curve(cards: List[MTGCard]) Dict
+    }
+
+    CardLookupService o-- CAGCache
+    CardLookupService o-- DatabaseService
+    KnowledgeService o-- CAGCache
+    KnowledgeService o-- MultiTierCache
+    KnowledgeService o-- DatabaseService
+    KnowledgeFetchAgent --> CardLookupService
+    DeckBuilderService --> KnowledgeFetchAgent
+    DeckBuilderService --> SymbolicReasoningAgent
+    DeckBuilderService --> CardLookupService
+    DeckBuilderService --> DeckAnalyzerAgent
+    DeckBuilderService --> DeckAnalyzer
+    DeckAnalyzer --> CardLookupService
+
+    %% ============================================================================
+    %% ORCHESTRATION LAYER
+    %% ============================================================================
+    class AgentOrchestrator {
+        -scheduling_agent: SchedulingAgent
+        -knowledge_agent: KnowledgeFetchAgent
+        -symbolic_agent: SymbolicReasoningAgent
+        -deck_builder_service: DeckBuilderService
+        -multi_tier_cache: MultiTierCache
+        +process_query(query: UserQuery) FusedResponse
+        -_route_to_agents(query_intent: QueryIntent) List[AgentResponse]
+        -_fuse_results(responses: List[AgentResponse]) FusedResponse
+    }
+
+    AgentOrchestrator o-- SchedulingAgent
+    AgentOrchestrator o-- KnowledgeFetchAgent
+    AgentOrchestrator o-- SymbolicReasoningAgent
+    AgentOrchestrator o-- DeckBuilderService
+    AgentOrchestrator o-- MultiTierCache
+
+    %% ============================================================================
+    %% DATA MODELS
+    %% ============================================================================
+    class MTGCard {
+        +id: str
+        +name: str
+        +mana_cost: Optional[str]
+        +cmc: float
+        +colors: List[CardColor]
+        +color_identity: List[CardColor]
+        +type_line: str
+        +types: List[CardType]
+        +subtypes: List[str]
+        +oracle_text: Optional[str]
+        +power: Optional[str]
+        +toughness: Optional[str]
+        +loyalty: Optional[str]
+        +set_code: str
+        +rarity: str
+        +legalities: Dict[str, str]
+        +keywords: List[str]
+    }
+
+    class CardORM {
+        +id: str
+        +name: str
+        +mana_cost: Optional[str]
+        +cmc: float
+        +colors: str
+        +color_identity: str
+        +type_line: str
+        +types: str
+        +subtypes: str
+        +oracle_text: Optional[str]
+        +power: Optional[str]
+        +toughness: Optional[str]
+        +loyalty: Optional[str]
+        +set_code: str
+        +rarity: str
+        +legalities: str
+        +keywords: str
+    }
+
+    class CardColor {
+        <<enumeration>>
+        WHITE
+        BLUE
+        BLACK
+        RED
+        GREEN
+        COLORLESS
+    }
+
+    class CardType {
+        <<enumeration>>
+        CREATURE
+        INSTANT
+        SORCERY
+        ENCHANTMENT
+        ARTIFACT
+        PLANESWALKER
+        LAND
+        TRIBAL
+        BATTLE
+    }
+
+    class AgentType {
+        <<enumeration>>
+        SCHEDULING
+        KNOWLEDGE_FETCH
+        SYMBOLIC_REASONING
+        DECK_ANALYZER
+    }
+
+    class AgentState {
+        +agent_id: str
+        +agent_type: AgentType
+        +current_task: Optional[str]
+        +status: str
+        +working_memory: Dict[str, Any]
+        +metrics: Dict[str, float]
+    }
+
+    class QueryType {
+        <<enumeration>>
+        DECK_BUILDING
+        CARD_SEARCH
+        RULES_QUESTION
+        CARD_INTERACTION
+        FORMAT_LEGALITY
+        COMBO_QUERY
+    }
+
+    class QueryIntent {
+        +primary_intent: QueryType
+        +entities: List[str]
+        +constraints: Dict[str, Any]
+        +requires_symbolic_reasoning: bool
+        +requires_knowledge_fetch: bool
+        +temporal_context: Optional[str]
+    }
+
+    class UserQuery {
+        +query_id: str
+        +session_id: str
+        +query_text: str
+        +context: Dict[str, Any]
+        +timestamp: datetime
+        +intent: Optional[QueryIntent]
+    }
+
+    class AgentResponse {
+        +agent_type: str
+        +success: bool
+        +data: Dict[str, Any]
+        +confidence: float
+        +reasoning_trace: List[str]
+        +error: Optional[str]
+    }
+
+    class ReasoningStep {
+        +step_id: str
+        +agent_type: AgentType
+        +action: str
+        +input_data: Dict
+        +output_data: Dict
+        +confidence: float
+        +timestamp: datetime
+    }
+
+    class ReasoningChain {
+        +query_id: str
+        +steps: List[ReasoningStep]
+        +final_result: Optional[Dict]
+        +total_confidence: float
+    }
+
+    class FusedResponse {
+        +query_id: str
+        +session_id: str
+        +answer: str
+        +confidence: float
+        +sources: List[str]
+        +agent_contributions: Dict[str, AgentResponse]
+        +reasoning_chain: Optional[List[Dict]]
+        +metadata: Dict[str, Any]
+        +timestamp: datetime
+    }
+
+    class DeckAnalysisResult {
+        +overall_score: float
+        +overall_assessment: str
+        +mana_curve: ManaCurveAnalysis
+        +land_ratio: LandRatioAnalysis
+        +synergies: List[SynergyDetection]
+        +win_conditions: WinConditionAnalysis
+        +archetype_consistency: ArchetypeConsistency
+        +strengths: DeckStrengths
+        +weaknesses: DeckWeaknesses
+        +priority_improvements: List[str]
+        +is_competitive: bool
+        +needs_major_changes: bool
+    }
+
+    class ManaCurveAnalysis {
+        +average_cmc: float
+        +curve_quality: str
+        +curve_distribution: Dict[str, int]
+        +focus_percentage: float
+        +recommendations: List[str]
+    }
+
+    class LandRatioAnalysis {
+        +land_count: int
+        +land_percentage: float
+        +ratio_quality: str
+        +recommended_land_count: Optional[int]
+        +recommendations: List[str]
+    }
+
+    class SynergyDetection {
+        +name: str
+        +card_names: List[str]
+        +description: str
+        +strength: str
+    }
+
+    class WinConditionAnalysis {
+        +primary_win_conditions: List[str]
+        +backup_win_conditions: List[str]
+        +win_condition_clarity: str
+        +recommendations: List[str]
+    }
+
+    class ArchetypeConsistency {
+        +declared_archetype: str
+        +consistency_score: float
+        +archetype_strengths: List[str]
+        +archetype_weaknesses: List[str]
+        +recommendations: List[str]
+    }
+
+    class DeckStrengths {
+        +strengths: List[str]
+    }
+
+    class DeckWeaknesses {
+        +weaknesses: List[str]
+    }
+
+    class CardCollection {
+        +cards: List[MTGCard]
+        +total_count: int
+        +format_filter: Optional[str]
+        +metadata: Dict
+        +cached_at: datetime
+    }
+
+    MTGCard "1" *-- "many" CardColor
+    MTGCard "1" *-- "many" CardType
+    BaseAgent "1" *-- "1" AgentState
+    BaseAgent "1" *-- "1" AgentType
+    UserQuery "1" *-- "1" QueryIntent
+    QueryIntent "1" *-- "1" QueryType
+    ReasoningChain "1" *-- "many" ReasoningStep
+    ReasoningStep "1" *-- "1" AgentType
+    FusedResponse "1" *-- "many" AgentResponse
+    DeckAnalysisResult "1" *-- "1" ManaCurveAnalysis
+    DeckAnalysisResult "1" *-- "1" LandRatioAnalysis
+    DeckAnalysisResult "1" *-- "many" SynergyDetection
+    DeckAnalysisResult "1" *-- "1" WinConditionAnalysis
+    DeckAnalysisResult "1" *-- "1" ArchetypeConsistency
+    DeckAnalysisResult "1" *-- "1" DeckStrengths
+    DeckAnalysisResult "1" *-- "1" DeckWeaknesses
+    CardCollection "1" *-- "many" MTGCard
+    DatabaseService ..> CardORM : uses
+    CardORM ..> MTGCard : converts to
+    CAGCache "1" *-- "many" MTGCard
+    AgentOrchestrator ..> UserQuery : processes
+    AgentOrchestrator ..> FusedResponse : produces
+
+    %% ============================================================================
+    %% CONFIGURATION
+    %% ============================================================================
+    class Settings {
+        +app_name: str
+        +version: str
+        +debug: bool
+        +default_model: str
+        +scheduling_model: str
+        +knowledge_model: str
+        +symbolic_model: str
+        +analyzer_model: str
+        +mtgjson_path: str
+        +preload_on_startup: bool
+        +l1_max_size: int
+        +l2_max_size: int
+        +l3_max_size: int
+        +host: str
+        +port: int
+        +openai_api_key: str
+        +anthropic_api_key: str
+    }
+
+    %% ============================================================================
+    %% NOTES
+    %% ============================================================================
+    note for BaseAgent "Abstract base class implementing\nthe Strategy pattern for\npluggable agent types"
+    note for CardLookupService "Two-tier lookup:\n1. CAGCache (O(1) hot cards)\n2. DatabaseService (O(log n) full DB)"
+    note for MultiTierCache "L1 (200): Hot queries\nL2 (1000): Warm queries\nL3 (10000): Cold queries\nAuto-promotion on access"
+    note for DeckBuilderService "Iterative deck building:\n1. Fetch candidate cards\n2. Validate with SymbolicAgent\n3. Analyze with DeckAnalyzerAgent\n4. Improve quality\n5. Repeat until complete"
+    note for AgentOrchestrator "Orchestrates multi-agent workflow:\n1. Schedule (planning)\n2. Route (knowledge/building)\n3. Validate (symbolic reasoning)\n4. Fuse (combine results)"

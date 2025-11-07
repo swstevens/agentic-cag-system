@@ -13,6 +13,7 @@ from .services.cache_service import MultiTierCache
 from .services.knowledge_service import KnowledgeService
 from .services.database_service import DatabaseService
 from .services.card_lookup_service import CardLookupService
+from .services.vector_store_service import VectorStoreService
 from .agents.scheduling_agent import SchedulingAgent
 from .agents.knowledge_fetch_agent import KnowledgeFetchAgent
 from .agents.symbolic_reasoning_agent import SymbolicReasoningAgent
@@ -32,19 +33,30 @@ async def lifespan(app: FastAPI):
     cache.l2_max_size = settings.cache_l2_max_size
     cache.l3_max_size = settings.cache_l3_max_size
 
-    # Initialize database (SQLite)
-    db_path = "./data/cards.db"
+    # Initialize database (AtomicCards database)
+    db_path = "./data/cards_atomic.db"
     db = None
+    vector_store = None
     if os.path.exists(db_path):
-        print(f"📀 Loading existing database: {db_path}")
+        print(f"📀 Loading database: {db_path}")
         db = DatabaseService(db_path)
         db.connect()
         card_count = db.card_count()
-        print(f"   Database contains {card_count:,} cards")
+        print(f"   Database contains {card_count:,} unique cards")
     else:
         print(f"⚠️  Database not found at {db_path}")
-        print(f"   Run 'python -m mtg_cag_system.scripts.build_database' to create it")
+        print(f"   Run 'python scripts/load_atomic_cards.py' to create it")
         print(f"   System will work with limited card data (sample cards only)")
+
+    # Initialize vector store for semantic search
+    print("🔮 Initializing vector store...")
+    vector_store = VectorStoreService(persist_directory="./data/chroma")
+    if vector_store.is_initialized():
+        stats = vector_store.get_embedding_stats()
+        print(f"   Vector store ready: {stats['total_embeddings']:,} embeddings loaded")
+    else:
+        print(f"⚠️  Vector embeddings not found. Run 'python scripts/build_embeddings.py' to create them")
+        vector_store = None
 
     # Initialize card lookup service
     card_lookup_service = CardLookupService(database_service=db)
@@ -113,6 +125,8 @@ async def lifespan(app: FastAPI):
     app.state.orchestrator = orchestrator
     app.state.cache = cache
     app.state.knowledge_service = knowledge_service
+    app.state.database_service = db
+    app.state.vector_store = vector_store
 
     print("✅ MTG CAG System ready!")
 
