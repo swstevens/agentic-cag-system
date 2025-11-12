@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any, List
 from ..models.card import MTGCard
 from ..models.query import UserQuery
 from ..models.response import FusedResponse, AgentResponse
+from ..models.responses import SynergyLookupResponse
 from ..models.agent import AgentState
 from ..controllers.orchestrator import AgentOrchestrator
 
@@ -170,3 +171,63 @@ async def get_agent_status(
         "knowledge_fetch": orchestrator.knowledge_agent.get_state(),
         "symbolic_reasoning": orchestrator.symbolic_agent.get_state()
     }
+
+
+@router.get("/synergy/{card_name}", response_model=SynergyLookupResponse)
+async def lookup_card_synergies(
+    card_name: str,
+    max_results: int = 10,
+    format_filter: Optional[str] = None,
+    archetype: Optional[str] = None,
+    orchestrator: AgentOrchestrator = Depends(get_orchestrator)
+) -> SynergyLookupResponse:
+    """
+    Look up synergistic cards for a given card using semantic similarity.
+
+    This endpoint finds cards that work well together mechanically and thematically
+    using vector embeddings from the ChromaDB semantic store.
+
+    Args:
+        card_name: Name of the card to find synergies for (e.g., "Lightning Bolt")
+        max_results: Maximum number of synergistic cards to return (default: 10, max: 100)
+        format_filter: Optional format to filter results by legality (Standard, Modern, Commander, etc.)
+        archetype: Optional archetype for context (aggro, control, midrange, combo, tempo, ramp)
+
+    Returns:
+        SynergyLookupResponse with:
+        - source_card: The queried card name
+        - synergies: List of synergistic cards with similarity scores (0.0-1.0)
+        - total_found: Number of synergies returned
+        - execution_time: Time taken for the lookup in seconds
+
+    Examples:
+        GET /api/v1/synergy/Lightning%20Bolt
+        GET /api/v1/synergy/Counterspell?max_results=20&format_filter=Modern
+        GET /api/v1/synergy/Goblin%20Electromancer?archetype=aggro&max_results=15
+    """
+    # Validate max_results
+    if max_results < 1 or max_results > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="max_results must be between 1 and 100"
+        )
+
+    # Get synergy lookup service from orchestrator
+    synergy_service = orchestrator.synergy_lookup_service
+
+    # Process the synergy lookup
+    response = await synergy_service.lookup_synergies(
+        card_name=card_name,
+        max_results=max_results,
+        archetype=archetype,
+        format_filter=format_filter
+    )
+
+    # Validate that card was found
+    if response.total_found == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Card '{card_name}' not found or no synergies available"
+        )
+
+    return response

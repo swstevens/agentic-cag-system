@@ -227,3 +227,52 @@ class AnalysisRequest(AgentRequest):
                 "deck_size": 60
             }
         }
+
+
+class SynergyLookupRequest(AgentRequest):
+    """
+    Request for looking up synergistic cards for a given card.
+
+    Pydantic validation ensures:
+    - card_name is provided and non-empty
+    - max_results is within reasonable bounds
+    """
+    card_name: str = Field(
+        ...,
+        min_length=1,
+        description="Name of the card to find synergies for",
+        examples=["Lightning Bolt", "Counterspell"]
+    )
+    max_results: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of synergistic cards to return"
+    )
+    archetype: Optional[DeckArchetype] = Field(
+        None,
+        description="Optional archetype to filter synergies by context"
+    )
+    format_filter: Optional[str] = Field(
+        None,
+        description="Optional format to filter results by legality",
+        examples=["Standard", "Modern", "Commander"]
+    )
+
+    @field_validator('card_name')
+    @classmethod
+    def validate_card_name_not_empty(cls, v: str) -> str:
+        """Ensure card_name is not just whitespace"""
+        if not v.strip():
+            raise ValueError("card_name cannot be empty or whitespace")
+        return v.strip()
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "card_name": "Lightning Bolt",
+                "max_results": 10,
+                "archetype": "aggro",
+                "format_filter": "Modern"
+            }
+        }

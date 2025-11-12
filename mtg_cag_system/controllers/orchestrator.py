@@ -34,6 +34,13 @@ class AgentOrchestrator:
             card_lookup=knowledge_agent.card_lookup  # Use the CardLookupService instance from KnowledgeFetchAgent
         )
 
+        # Initialize synergy lookup service
+        from ..services.synergy_lookup_service import SynergyLookupService
+        self.synergy_lookup_service = SynergyLookupService(
+            vector_store=knowledge_agent.vector_store,
+            card_lookup=knowledge_agent.card_lookup
+        )
+
     async def process_query(self, query: UserQuery) -> FusedResponse:
         """Process query through agent pipeline (Public API)"""
         reasoning_chain = ReasoningChain(query_id=query.query_id)

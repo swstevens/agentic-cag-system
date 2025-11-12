@@ -108,6 +108,9 @@ async def lifespan(app: FastAPI):
         model_name=settings.default_model,
         api_key=settings.openai_api_key
     )
+    # Attach vector store to knowledge agent for synergy lookup
+    knowledge_agent.vector_store = vector_store
+
     symbolic_agent = SymbolicReasoningAgent(
         model_name=settings.default_model,
         api_key=settings.openai_api_key

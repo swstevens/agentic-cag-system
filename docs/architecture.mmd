@@ -6,43 +6,57 @@ classDiagram
     %% ============================================================================
     %% BASE AGENT HIERARCHY
     %% ============================================================================
+    class IAgent {
+        <<interface>>
+        +process(request: Any)* AgentResponse
+        +get_state()* AgentState
+        +update_state(status: str, task: str)*
+    }
+
     class BaseAgent {
         <<abstract>>
         #agent_id: str
         #agent_type: AgentType
         #state: AgentState
-        #_pydantic_agent: Optional[PydanticAgent]
-        +process(input_data: Dict)* AgentResponse
+        +process(request: Any)* AgentResponse
         +update_state(status: str, task: str)
         +get_state() AgentState
     }
 
+    IAgent <|.. BaseAgent
+
     class SchedulingAgent {
         -model: str
-        +process(input_data: Dict) AgentResponse
+        -api_key: str
+        +process(request: Any) AgentResponse
         -_extract_requirements(query: str) Dict
         -_classify_query_type(query: str) QueryType
     }
 
     class KnowledgeFetchAgent {
-        -card_lookup_service: CardLookupService
+        -repository: ICardRepository
         -model: str
-        +process(input_data: Dict) AgentResponse
-        -_extract_card_names(query: str) List[str]
+        -api_key: str
+        +process(request: Any) AgentResponse
+        -_extract_card_names_with_llm(query: str) List[str]
         -_lookup_cards(card_names: List[str]) List[MTGCard]
     }
 
     class SymbolicReasoningAgent {
+        -validators: List[IValidator]
         -model: str
-        +process(input_data: Dict) AgentResponse
+        -api_key: str
+        +process(request: Any) AgentResponse
         -_validate_deck_legality(cards: List[MTGCard]) bool
         -_analyze_mana_curve(cards: List[MTGCard]) Dict
         -_check_card_interactions(cards: List[MTGCard]) List[str]
     }
 
     class DeckAnalyzerAgent {
+        -analyzer: IAnalyzer
         -model: str
-        +process(input_data: Dict) AgentResponse
+        -api_key: str
+        +process(request: Any) AgentResponse
         -_analyze_with_llm(cards: List[MTGCard]) DeckAnalysisResult
     }
 
@@ -50,6 +64,43 @@ classDiagram
     BaseAgent <|-- KnowledgeFetchAgent
     BaseAgent <|-- SymbolicReasoningAgent
     BaseAgent <|-- DeckAnalyzerAgent
+
+    %% ============================================================================
+    %% CORE ABSTRACTIONS (Interface Segregation)
+    %% ============================================================================
+    class ICache {
+        <<interface>>
+        +get(key: str)* Optional[Any]
+        +put(key: str, value: Any)*
+        +evict(key: str)*
+        +clear()*
+        +get_stats()* Dict
+    }
+
+    class ICardRepository {
+        <<interface>>
+        +get_by_name(name: str)* Optional[MTGCard]
+        +search(criteria: SearchCriteria)* List[MTGCard]
+        +fuzzy_search(name: str, limit: int)* List[MTGCard]
+    }
+
+    class IAnalyzer {
+        <<interface>>
+        +analyze(cards: List[MTGCard], context: AnalysisContext)* AnalysisResult
+    }
+
+    class IValidator {
+        <<interface>>
+        +validate(cards: List[MTGCard], rules: ValidationRules)* ValidationResult
+    }
+
+    class IConnectionManager {
+        <<interface>>
+        +connect()*
+        +disconnect()*
+        +is_connected()* bool
+        +get_session()* Session
+    }
 
     %% ============================================================================
     %% SERVICE LAYER
@@ -62,22 +113,10 @@ classDiagram
         +disconnect()
         +get_card_by_name(name: str) Optional[MTGCard]
         +search_cards(filters: Dict) List[MTGCard]
-        +fuzzy_search(name: str) List[MTGCard]
+        +fuzzy_search(name: str, limit: int) List[MTGCard]
         +load_from_mtgjson(file_path: str)
         -_create_tables()
         -_create_fts_index()
-    }
-
-    class CAGCache {
-        -cache: OrderedDict
-        -max_size: int
-        -access_counts: Dict[str, int]
-        +get(card_name: str) Optional[MTGCard]
-        +put(card: MTGCard)
-        +preload_format_cards(format: str, limit: int)
-        +get_context_string() str
-        +get_stats() Dict
-        -_evict_lru()
     }
 
     class MultiTierCache {
@@ -89,83 +128,138 @@ classDiagram
         -l3_max: int
         +get(key: str, tier: str) Optional[Any]
         +set(key: str, value: Any, tier: str, ttl: int)
+        +get_stats() Dict
         -_promote_to_l1(key: str)
         -_evict_from_tier(tier: str)
     }
 
-    class CardLookupService {
-        -cag_cache: CAGCache
+    class CardRepository {
+        -cache: ICache
         -database_service: DatabaseService
-        +get_card(name: str) Optional[MTGCard]
-        +fuzzy_search(name: str) List[MTGCard]
-        +preload_cards(format: str, limit: int)
+        +get_by_name(name: str) Optional[MTGCard]
+        +search(criteria: SearchCriteria) List[MTGCard]
+        +fuzzy_search(name: str, limit: int) List[MTGCard]
         +preload_by_names(names: List[str])
-        +get_stats() Dict
+        -_get_from_cache(name: str) Optional[MTGCard]
+        -_get_from_db(name: str) Optional[MTGCard]
+        -_promote_to_cache(card: MTGCard)
     }
 
-    class KnowledgeService {
-        -cag_cache: CAGCache
-        -multi_tier_cache: MultiTierCache
-        -database_service: DatabaseService
-        +preload_knowledge(format: str)
-        +get_card_by_name(name: str) Optional[MTGCard]
-        +search_cards(filters: Dict) List[MTGCard]
-    }
-
-    class DeckBuilderService {
-        -knowledge_agent: KnowledgeFetchAgent
-        -symbolic_agent: SymbolicReasoningAgent
-        -card_lookup_service: CardLookupService
-        -deck_analyzer_agent: Optional[DeckAnalyzerAgent]
-        -deck_analyzer: DeckAnalyzer
-        +build_deck(requirements: Dict) Dict
-        -_fetch_cards_for_requirements(requirements: Dict) List[MTGCard]
+    class DeckBuilderServiceV2 {
+        -repository: ICardRepository
+        -analyzer: IAnalyzer
+        -validator: Optional[IValidator]
+        -max_iterations: int
+        -vector_store: Optional[VectorStoreService]
+        +build_deck(requirements: DeckRequirements) Deck
+        -_execute_build_iteration(requirements: DeckRequirements, deck: Deck) Deck
+        -_select_cards_for_archetype(pool: List[MTGCard], archetype: str) List[MTGCard]
         -_distribute_lands_by_color(colors: List, count: int) List[MTGCard]
-        -_improve_deck_quality(deck: List[MTGCard]) List[MTGCard]
-        -_remove_cards_intelligently(deck: List[MTGCard], count: int) List[MTGCard]
+        -_score_card(card: MTGCard, archetype: str) float
     }
 
-    class DeckAnalyzer {
-        -card_lookup_service: CardLookupService
-        +validate_candidate_cards(cards: List[MTGCard], format: str) Tuple
-        +analyze_full_deck(cards: List[MTGCard], archetype: str) Dict
-        -_check_format_legality(cards: List[MTGCard], format: str) List[MTGCard]
-        -_check_card_limits(cards: List[MTGCard]) List[MTGCard]
-        -_analyze_mana_curve(cards: List[MTGCard]) Dict
+    class SynergyLookupService {
+        -vector_store: VectorStoreService
+        -card_lookup: CardLookupService
+        +lookup_synergies(card_name: str, max_results: int) SynergyLookupResponse
+        -_build_format_filter(format_name: str) Dict
     }
 
-    CardLookupService o-- CAGCache
-    CardLookupService o-- DatabaseService
-    KnowledgeService o-- CAGCache
-    KnowledgeService o-- MultiTierCache
-    KnowledgeService o-- DatabaseService
-    KnowledgeFetchAgent --> CardLookupService
-    DeckBuilderService --> KnowledgeFetchAgent
-    DeckBuilderService --> SymbolicReasoningAgent
-    DeckBuilderService --> CardLookupService
-    DeckBuilderService --> DeckAnalyzerAgent
-    DeckBuilderService --> DeckAnalyzer
-    DeckAnalyzer --> CardLookupService
+    class VectorStoreService {
+        -collection: ChromaDB Collection
+        -embedding_function: SentenceTransformer
+        +find_similar_cards(card_name: str, n_results: int) List[Dict]
+        +find_cards_by_concept(concept: str, n_results: int) List[Dict]
+        +build_embeddings(database_service: DatabaseService)
+        +is_initialized() bool
+    }
+
+    class DeckRequirements {
+        +format: str
+        +colors: List[CardColor]
+        +archetype: str
+        +deck_size: int
+        +strategy_keywords: List[str]
+    }
+
+    class Deck {
+        +cards: List[MTGCard]
+        +format: str
+        +archetype: str
+        +size: int
+        +is_complete() bool
+        +add_card(card: MTGCard)
+        +remove_card(card_name: str)
+    }
+
+    class SearchCriteria {
+        +colors: Optional[List[CardColor]]
+        +types: Optional[List[CardType]]
+        +format: Optional[str]
+        +cmc_min: Optional[float]
+        +cmc_max: Optional[float]
+        +text_query: Optional[str]
+        +rarity: Optional[str]
+        +limit: int
+    }
+
+    class AnalysisContext {
+        +archetype: str
+        +format: Optional[str]
+        +target_deck_size: int
+        +metadata: Dict[str, Any]
+    }
+
+    class ValidationRules {
+        +format: str
+        +max_copies: int
+        +min_deck_size: int
+        +max_deck_size: int
+        +allow_basic_lands: bool
+    }
+
+    class ValidationResult {
+        +is_valid: bool
+        +validator_name: str
+        +messages: List[str]
+        +invalid_cards: List[str]
+        +suggestions: List[str]
+    }
+
+    ICache <|.. MultiTierCache
+    ICardRepository <|.. CardRepository
+    CardRepository o-- ICache
+    CardRepository o-- DatabaseService
+    KnowledgeFetchAgent --> ICardRepository
+    DeckBuilderServiceV2 --> ICardRepository
+    DeckBuilderServiceV2 --> IAnalyzer
+    DeckBuilderServiceV2 --> IValidator
+    DeckBuilderServiceV2 ..> DeckRequirements
+    DeckBuilderServiceV2 ..> Deck
 
     %% ============================================================================
     %% ORCHESTRATION LAYER
     %% ============================================================================
-    class AgentOrchestrator {
-        -scheduling_agent: SchedulingAgent
-        -knowledge_agent: KnowledgeFetchAgent
-        -symbolic_agent: SymbolicReasoningAgent
-        -deck_builder_service: DeckBuilderService
-        -multi_tier_cache: MultiTierCache
+    class AgentOrchestratorV2 {
+        -scheduling_agent: IAgent
+        -knowledge_agent: IAgent
+        -symbolic_agent: IAgent
+        -cache: ICache
+        -deck_builder: Optional[DeckBuilderServiceV2]
+        -synergy_lookup_service: Optional[SynergyLookupService]
         +process_query(query: UserQuery) FusedResponse
-        -_route_to_agents(query_intent: QueryIntent) List[AgentResponse]
-        -_fuse_results(responses: List[AgentResponse]) FusedResponse
+        -_handle_deck_building(query: UserQuery) Tuple[str, float]
+        -_handle_card_lookup(query: UserQuery) Tuple[str, float]
+        -_handle_rules_question(query: UserQuery) Tuple[str, float]
+        -_fuse_results(responses: Dict) FusedResponse
     }
 
-    AgentOrchestrator o-- SchedulingAgent
-    AgentOrchestrator o-- KnowledgeFetchAgent
-    AgentOrchestrator o-- SymbolicReasoningAgent
-    AgentOrchestrator o-- DeckBuilderService
-    AgentOrchestrator o-- MultiTierCache
+    AgentOrchestratorV2 o-- IAgent
+    AgentOrchestratorV2 o-- ICache
+    AgentOrchestratorV2 o-- DeckBuilderServiceV2
+    AgentOrchestratorV2 o-- SynergyLookupService
+    SynergyLookupService --> VectorStoreService
+    SynergyLookupService --> CardRepository
 
     %% ============================================================================
     %% DATA MODELS
@@ -385,6 +479,27 @@ classDiagram
         +cached_at: datetime
     }
 
+    class SynergyLookupRequest {
+        +card_name: str
+        +max_results: int
+        +archetype: Optional[str]
+        +format_filter: Optional[str]
+    }
+
+    class SynergyResult {
+        +name: str
+        +similarity_score: float
+        +card_id: Optional[str]
+    }
+
+    class SynergyLookupResponse {
+        +source_card: str
+        +synergies: List[SynergyResult]
+        +total_found: int
+        +execution_time: float
+        +top_synergies() List[SynergyResult]
+    }
+
     MTGCard "1" *-- "many" CardColor
     MTGCard "1" *-- "many" CardType
     BaseAgent "1" *-- "1" AgentState
@@ -402,6 +517,7 @@ classDiagram
     DeckAnalysisResult "1" *-- "1" DeckStrengths
     DeckAnalysisResult "1" *-- "1" DeckWeaknesses
     CardCollection "1" *-- "many" MTGCard
+    SynergyLookupResponse "1" *-- "many" SynergyResult
     DatabaseService ..> CardORM : uses
     CardORM ..> MTGCard : converts to
     CAGCache "1" *-- "many" MTGCard
@@ -434,8 +550,10 @@ classDiagram
     %% ============================================================================
     %% NOTES
     %% ============================================================================
-    note for BaseAgent "Abstract base class implementing\nthe Strategy pattern for\npluggable agent types"
-    note for CardLookupService "Two-tier lookup:\n1. CAGCache (O(1) hot cards)\n2. DatabaseService (O(log n) full DB)"
-    note for MultiTierCache "L1 (200): Hot queries\nL2 (1000): Warm queries\nL3 (10000): Cold queries\nAuto-promotion on access"
-    note for DeckBuilderService "Iterative deck building:\n1. Fetch candidate cards\n2. Validate with SymbolicAgent\n3. Analyze with DeckAnalyzerAgent\n4. Improve quality\n5. Repeat until complete"
-    note for AgentOrchestrator "Orchestrates multi-agent workflow:\n1. Schedule (planning)\n2. Route (knowledge/building)\n3. Validate (symbolic reasoning)\n4. Fuse (combine results)"
+    note for IAgent "Interface Segregation:\nAll agents implement\ncommon contract via IAgent"
+    note for ICardRepository "Repository Pattern:\nAbstracts data access\nwith cache + DB fallback"
+    note for CardRepository "Two-tier lookup:\n1. ICache (O(1) hot cards)\n2. DatabaseService (O(log n) full DB)"
+    note for MultiTierCache "L1: Hot queries (Dict)\nL2: Warm queries (Dict)\nL3: Cold queries (Dict)\nAuto-promotion on access"
+    note for DeckBuilderServiceV2 "Iterative deck building:\n1. Fetch candidate cards via repository\n2. Score cards by archetype\n3. Analyze with IAnalyzer\n4. Validate with IValidator\n5. Repeat until deck complete\nOptional vector store integration"
+    note for SynergyLookupService "Semantic synergy search:\n1. Resolve card name via CardRepository\n2. Query VectorStoreService for embeddings\n3. Apply optional format/archetype filters\n4. Return sorted results by similarity\n5. Convert distances to similarity scores (0-1)"
+    note for AgentOrchestratorV2 "Simplified orchestration:\n1. Route by query type\n2. Delegate to agents\n3. Fuse results\nNote: Not yet pipeline-based,\nno circuit breaker or retry patterns"

@@ -208,3 +208,75 @@ class AnalysisResponse(BaseModel):
                 "execution_time": 2.3
             }
         }
+
+
+class SynergyResult(BaseModel):
+    """Individual synergy result for a card"""
+    name: str = Field(
+        ...,
+        description="Card name"
+    )
+    similarity_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Similarity score (0.0-1.0)"
+    )
+    card_id: Optional[str] = Field(
+        None,
+        description="Card ID from database"
+    )
+
+
+class SynergyLookupResponse(BaseModel):
+    """
+    Response from synergy lookup with list of synergistic cards.
+
+    Pydantic validates:
+    - source_card is provided
+    - synergies list contains valid SynergyResult objects
+    """
+    source_card: str = Field(
+        ...,
+        description="The card that was queried for synergies"
+    )
+    synergies: List[SynergyResult] = Field(
+        default_factory=list,
+        description="List of synergistic cards with similarity scores"
+    )
+    total_found: int = Field(
+        default=0,
+        ge=0,
+        description="Total number of synergies found"
+    )
+    execution_time: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Time taken for synergy lookup in seconds"
+    )
+
+    @property
+    def top_synergies(self) -> List[SynergyResult]:
+        """Get synergies sorted by similarity score (highest first)"""
+        return sorted(self.synergies, key=lambda s: s.similarity_score, reverse=True)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "source_card": "Lightning Bolt",
+                "synergies": [
+                    {
+                        "name": "Chain Lightning",
+                        "similarity_score": 0.95,
+                        "card_id": "card_123"
+                    },
+                    {
+                        "name": "Shock",
+                        "similarity_score": 0.87,
+                        "card_id": "card_456"
+                    }
+                ],
+                "total_found": 2,
+                "execution_time": 0.15
+            }
+        }
