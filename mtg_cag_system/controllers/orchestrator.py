@@ -36,8 +36,10 @@ class AgentOrchestrator:
 
         # Initialize synergy lookup service
         from ..services.synergy_lookup_service import SynergyLookupService
+        from ..services.pattern_synergy_service import PatternSynergyService
+        pattern_synergy = PatternSynergyService(synergy_patterns_path="./data/synergy_patterns.json")
         self.synergy_lookup_service = SynergyLookupService(
-            vector_store=knowledge_agent.vector_store,
+            pattern_synergy=pattern_synergy,
             card_lookup=knowledge_agent.card_lookup
         )
 

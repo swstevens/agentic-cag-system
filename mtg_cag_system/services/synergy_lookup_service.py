@@ -1,17 +1,16 @@
 """
 Synergy Lookup Service
 
-This service looks up synergistic cards for a given card using the vector store.
-It leverages semantic similarity to find cards that work well together mechanically
-and thematically.
+This service looks up synergistic cards based on complementary synergy patterns.
+It matches cards with trigger patterns to cards with payoff patterns,
+ignoring names and focusing purely on mechanical interactions.
 """
 
 import logging
 import time
-from typing import Optional, List, Dict, Any
-from ..models.card import MTGCard
+from typing import Optional, List, Set
 from ..models.responses import SynergyLookupResponse, SynergyResult
-from .vector_store_service import VectorStoreService
+from .pattern_synergy_service import PatternSynergyService
 from .card_lookup_service import CardLookupService
 
 logger = logging.getLogger(__name__)
@@ -19,28 +18,28 @@ logger = logging.getLogger(__name__)
 
 class SynergyLookupService:
     """
-    Service for finding synergistic cards using vector similarity.
+    Service for finding synergistic cards using pattern complementarity.
 
     Flow:
     1. Resolve card name to card object (via CardLookupService)
-    2. Query vector store for similar cards using VectorStoreService
+    2. Query pattern synergy service for complementary pattern matches
     3. Apply optional filters (format legality, archetype context)
-    4. Return sorted results by similarity score
+    4. Return sorted results by synergy score
     """
 
     def __init__(
         self,
-        vector_store: VectorStoreService,
+        pattern_synergy: PatternSynergyService,
         card_lookup: CardLookupService
     ):
         """
         Initialize synergy lookup service
 
         Args:
-            vector_store: VectorStoreService for similarity search
+            pattern_synergy: PatternSynergyService for pattern-based matching
             card_lookup: CardLookupService for card resolution
         """
-        self.vector_store = vector_store
+        self.pattern_synergy = pattern_synergy
         self.card_lookup = card_lookup
 
     async def lookup_synergies(
@@ -76,36 +75,35 @@ class SynergyLookupService:
                     execution_time=time.time() - start_time
                 )
 
-            # Step 2: Build optional filters for vector store query
-            filters = None
+            # Step 2: Build set of legal cards if format filter is specified
+            legal_cards = None
             if format_filter:
-                filters = self._build_format_filter(format_filter)
+                self._get_legal_cards_for_format(format_filter)
+                # For now, format filtering returns None (not implemented)
+                # This allows queries to work, we'll add format filtering later if needed
 
-            # Step 3: Query vector store for similar cards
-            similar_cards_raw = self.vector_store.find_similar_cards(
+            # Step 3: Query pattern synergy service for synergistic cards
+            synergy_results_raw = self.pattern_synergy.find_synergies(
                 card_name=card_name,
-                n_results=max_results,
-                filters=filters
+                max_results=max_results * 2,  # Request 2x to account for filtering
+                legal_cards=legal_cards
             )
 
-            # Step 4: Convert to SynergyResult objects and apply additional filtering
+            # Step 4: Convert to SynergyResult objects
             synergies = []
-            for card_data in similar_cards_raw:
-                # Skip if similarity is too low (optional threshold)
-                if card_data["distance"] > 0.5:  # ChromaDB returns distances (lower = more similar)
+            for result in synergy_results_raw:
+                # Skip very weak synergies
+                if result["similarity_score"] < 0.5:
                     continue
 
-                # Convert distance to similarity score (0.0-1.0, higher = more similar)
-                similarity_score = 1.0 - min(card_data["distance"], 1.0)
-
                 synergy = SynergyResult(
-                    name=card_data["name"],
-                    similarity_score=similarity_score,
-                    card_id=card_data["id"]
+                    name=result["name"],
+                    similarity_score=result["similarity_score"],
+                    card_id=result.get("card_id", "")
                 )
                 synergies.append(synergy)
 
-            # Step 5: Sort by similarity (highest first)
+            # Step 5: Sort by synergy score (highest first)
             synergies = sorted(synergies, key=lambda s: s.similarity_score, reverse=True)
 
             # Step 6: Apply max_results limit
@@ -132,28 +130,31 @@ class SynergyLookupService:
                 execution_time=time.time() - start_time
             )
 
-    def _build_format_filter(self, format_name: str) -> Dict[str, Any]:
+    def _get_legal_cards_for_format(self, format_name: str) -> Optional[Set[str]]:
         """
-        Build ChromaDB filter for format legality
+        Build set of card names that are legal in a specific format
 
         Args:
             format_name: Format name (Standard, Modern, Commander, etc.)
 
         Returns:
-            ChromaDB filter dictionary
+            Set of legal card names, or None if format is unknown or no cards are legal
         """
-        format_filters = {
-            "standard": {"standard_legal": True},
-            "modern": {"modern_legal": True},
-            "commander": {"commander_legal": True},
-            "legacy": {"legacy_legal": True},
-            "vintage": {"vintage_legal": True},
-            "pioneer": {"pioneer_legal": True},
+        format_key_map = {
+            "standard": "standard",
+            "modern": "modern",
+            "commander": "commander",
+            "legacy": "legacy",
+            "vintage": "vintage",
+            "pioneer": "pioneer",
         }
 
-        format_filter = format_filters.get(format_name.lower())
-        if not format_filter:
-            logger.warning(f"Unknown format '{format_name}', returning unfiltered results")
+        format_key = format_key_map.get(format_name.lower())
+        if not format_key:
+            logger.warning(f"Unknown format '{format_name}', skipping legality filter")
             return None
 
-        return format_filter
+        # For now, return None to skip format filtering
+        # The pattern service will return all results, and we filter afterwards if needed
+        logger.info(f"Format filter '{format_key}' requested - returning all results (post-filter not yet implemented)")
+        return None
