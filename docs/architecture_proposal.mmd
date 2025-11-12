@@ -1,0 +1,171 @@
+---
+title: MTG CAG System - Final Architecture Diagram (V4 - Strategy Pattern)
+---
+classDiagram
+direction TB
+    class IAgent {
+	    +process(request: Any) AgentResponse*
+	    +get_state() AgentState*
+	    +update_state(status: str, task: str)*
+    }
+    class BaseAgent {
+	    #agent_id: str
+	    #agent_type: AgentType
+	    #state: AgentState
+	    +process(request: Any) AgentResponse*
+	    +update_state(status: str, task: str)
+	    +get_state() AgentState
+    }
+    class SchedulingAgent {
+	    -model: str
+	    -api_key: str
+	    +process(request: Any) AgentResponse*
+	    -_extract_requirements(query: str) Dict
+	    -_classify_query_type(query: str) QueryType
+    }
+    class KnowledgeFetchAgent {
+	    -repository: ICardRepository
+	    -model: str
+	    -api_key: str
+	    +process(request: Any) AgentResponse*
+	    -_extract_card_names_with_llm(query: str) List[str]
+	    -_lookup_cards(card_names: List[str]) List[MTGCard]
+    }
+    class AnalysisAndValidationAgent {
+	    -validators: List[IValidator]
+	    -reasoning_components: List[IReasoningComponent]
+	    -model: str
+	    -api_key: str
+	    -analyzer: IAnalyzer
+	    +process(request: Any) AgentResponse*
+	    -_validate_deck_legality(cards: List[MTGCard]) bool
+	    -_analyze_deck_structure(cards: List[MTGCard]) DeckAnalysisResult*
+	    -_check_card_interactions(cards: List[MTGCard]) List[str]
+    }
+    class ICache {
+	    +get(key: str) Optional[Any]*
+	    +set(key: str, value: Any) void*
+	    +evict(key: str)*
+	    +clear()*
+	    +get_stats() Dict*
+    }
+    class ICardRepository {
+	    +get_by_name(name: str) Optional[MTGCard]*
+	    +search(criteria: SearchCriteria) List[MTGCard]*
+	    +fuzzy_search(name: str, limit: int) List[MTGCard]*
+	    +get_all_cards() List[MTGCard]*
+	    +get_by_similarity(concept: str, n_results: int) List[MTGCard]*
+	    +get_similar_to_card(card_name: str, n_results: int) List[MTGCard]*
+    }
+    class IAnalyzer {
+	    +analyze(cards: List[MTGCard], context: AnalysisContext) AnalysisResult  &lt;-- REINTRODUCED for Strategy Pattern*
+    }
+    class IValidator {
+	    +validate(cards: List[MTGCard], rules: ValidationRules) ValidationResult*
+    }
+    class IReasoningComponent {
+	    +analyze(cards: List[MTGCard], context: AnalysisContext) AnalysisFragment*
+    }
+    class DatabaseService {
+	    -engine: Engine
+	    -session_factory: sessionmaker
+	    -db_path: str
+	    +connect()
+	    +disconnect()
+	    +get_card_by_name(name: str) Optional[MTGCard]
+	    +search_cards(filters: Dict) List[MTGCard]
+	    +fuzzy_search(name: str, limit: int) List[MTGCard]
+	    +load_from_mtgjson(file_path: str)
+    }
+    class VectorStoreService {
+	    -collection: ChromaDB Collection
+	    -embedding_function: SentenceTransformer
+	    +find_similar_card_ids(card_name: str, n_results: int) List[str]*
+	    +find_card_ids_by_concept(concept: str, n_results: int) List[str]*
+	    +build_embeddings(repository: ICardRepository)* +is_initialized() bool
+    }
+    class CardRepository {
+	    -cache: ICache
+	    -database_service: DatabaseService
+	    -vector_store: VectorStoreService
+	    +get_by_name(name: str) Optional[MTGCard]*
+	    +search(criteria: SearchCriteria) List[MTGCard]*
+	    +fuzzy_search(name: str, limit: int) List[MTGCard]*
+	    +get_all_cards() List[MTGCard]*
+	    +get_by_similarity(concept: str, n_results: int) List[MTGCard]*
+	    +get_similar_to_card(card_name: str, n_results: int) List[MTGCard]*
+	    +preload_by_names(names: List[str])
+	    -_get_full_cards_from_ids(card_ids: List[str]) List[MTGCard]*
+    }
+    class LLMDeckAnalyzer {
+	    -model_name: str
+	    +analyze(cards: List[MTGCard], context: AnalysisContext) DeckAnalysisResult*
+    }
+    class PatternSynergyService {
+	    -patterns: Dict[str, List[str]]
+	    +analyze(cards: List[MTGCard], context: AnalysisContext) AnalysisFragment*
+    }
+    class SemanticReasoningComponent {
+	    -repository: ICardRepository
+	    +analyze(cards: List[MTGCard], context: AnalysisContext) AnalysisFragment*
+    }
+    class DeckBuilderServiceV2 {
+	    -repository: ICardRepository
+	    -analyzer: IAnalyzer  ~-- DEPENDS on Strategy Interface
+	    -max_iterations: int
+	    // -validator: Optional[IValidator] &lt;-- REMOVED(Handled by Agent)
+	    +build_deck(requirements: DeckRequirements) Deck*
+	    -_select_cards_for_archetype(pool: List[MTGCard], archetype: str) List[MTGCard]*
+	    -_score_card(card: MTGCard, archetype: str) float
+    }
+    class AgentOrchestratorV2 {
+	    -scheduling_agent: IAgent
+	    -knowledge_agent: IAgent
+	    -analysis_agent: IAgent
+	    -cache: ICache
+	    -deck_builder: DeckBuilderServiceV2
+	    +process_query(query: UserQuery) FusedResponse*
+    }
+    class CardORM {
+    }
+    class MTGCard {
+    }
+    class IAnalyzer_2["IAnalyzer"] {
+    }
+
+	<<interface>> IAgent
+	<<abstract>> BaseAgent
+	<<interface>> ICache
+	<<interface>> ICardRepository
+	<<interface>> IAnalyzer
+	<<interface>> IValidator
+	<<interface>> IReasoningComponent
+
+	note for CardRepository "Repository Pattern: Unified ASYNC Access (SQL/ChromaDB). Implements all data retrieval methods."
+	note for LLMDeckAnalyzer "Concrete Strategy: Implements IAnalyzer for LLM-based, rich deck analysis."
+	note for DeckBuilderServiceV2 "Relies on IAnalyzer (Strategy Pattern) for iterative deck scoring and feedback. All validation is delegated to the Agent."
+	note for AnalysisAndValidationAgent "Orchestrator: Coordinates validation (IValidator), deep reasoning (IReasoningComponent), and high-level scoring (IAnalyzer)."
+
+    IAgent <|.. BaseAgent
+    BaseAgent <|-- SchedulingAgent
+    BaseAgent <|-- KnowledgeFetchAgent
+    BaseAgent <|-- AnalysisAndValidationAgent
+    IAnalyzer <|.. LLMDeckAnalyzer
+    ICardRepository <|.. CardRepository
+    CardRepository o-- ICache
+    CardRepository o-- DatabaseService
+    CardRepository o-- VectorStoreService
+    VectorStoreService --> ICardRepository : initialises_from
+    KnowledgeFetchAgent --> ICardRepository
+    DeckBuilderServiceV2 o-- ICardRepository
+    DeckBuilderServiceV2 o-- IAnalyzer
+    AnalysisAndValidationAgent o-- IValidator
+    AnalysisAndValidationAgent o-- IReasoningComponent
+    AnalysisAndValidationAgent o-- IAnalyzer_2
+    IReasoningComponent <|.. PatternSynergyService
+    IReasoningComponent <|.. SemanticReasoningComponent
+    SemanticReasoningComponent --> ICardRepository
+    AgentOrchestratorV2 o-- IAgent
+    AgentOrchestratorV2 o-- DeckBuilderServiceV2
+    DatabaseService ..> CardORM : uses
+    CardORM ..> MTGCard : converts_to

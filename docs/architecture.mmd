@@ -52,18 +52,9 @@ classDiagram
         -_check_card_interactions(cards: List[MTGCard]) List[str]
     }
 
-    class DeckAnalyzerAgent {
-        -analyzer: IAnalyzer
-        -model: str
-        -api_key: str
-        +process(request: Any) AgentResponse
-        -_analyze_with_llm(cards: List[MTGCard]) DeckAnalysisResult
-    }
-
     BaseAgent <|-- SchedulingAgent
     BaseAgent <|-- KnowledgeFetchAgent
     BaseAgent <|-- SymbolicReasoningAgent
-    BaseAgent <|-- DeckAnalyzerAgent
 
     %% ============================================================================
     %% CORE ABSTRACTIONS (Interface Segregation)
@@ -71,7 +62,7 @@ classDiagram
     class ICache {
         <<interface>>
         +get(key: str)* Optional[Any]
-        +put(key: str, value: Any)*
+        +set(key: str, value: Any)* void
         +evict(key: str)*
         +clear()*
         +get_stats()* Dict
@@ -158,11 +149,19 @@ classDiagram
         -_score_card(card: MTGCard, archetype: str) float
     }
 
+    class PatternSynergyService {
+        -patterns: Dict[str, List[str]]
+        -pattern_complements: Dict[str, List[str]]
+        -synergy_scores: Dict[Tuple, float]
+        +find_synergies(card_name: str, max_results: int, legal_cards: List) List[Dict]
+        -_calculate_synergy_score(pattern1: str, pattern2: str) float
+    }
+
     class SynergyLookupService {
-        -vector_store: VectorStoreService
+        -pattern_synergy: PatternSynergyService
         -card_lookup: CardLookupService
-        +lookup_synergies(card_name: str, max_results: int) SynergyLookupResponse
-        -_build_format_filter(format_name: str) Dict
+        +lookup_synergies(card_name: str, max_results: int, format_filter: str) SynergyLookupResponse
+        -_apply_format_filter(synergies: List, format_filter: str) List
     }
 
     class VectorStoreService {
@@ -245,20 +244,18 @@ classDiagram
         -knowledge_agent: IAgent
         -symbolic_agent: IAgent
         -cache: ICache
-        -deck_builder: Optional[DeckBuilderServiceV2]
-        -synergy_lookup_service: Optional[SynergyLookupService]
+        -deck_builder: DeckBuilderServiceV2
         +process_query(query: UserQuery) FusedResponse
         -_handle_deck_building(query: UserQuery) Tuple[str, float]
         -_handle_card_lookup(query: UserQuery) Tuple[str, float]
-        -_handle_rules_question(query: UserQuery) Tuple[str, float]
         -_fuse_results(responses: Dict) FusedResponse
     }
 
     AgentOrchestratorV2 o-- IAgent
     AgentOrchestratorV2 o-- ICache
     AgentOrchestratorV2 o-- DeckBuilderServiceV2
-    AgentOrchestratorV2 o-- SynergyLookupService
-    SynergyLookupService --> VectorStoreService
+    PatternSynergyService --> CardRepository
+    SynergyLookupService --> PatternSynergyService
     SynergyLookupService --> CardRepository
 
     %% ============================================================================
@@ -520,9 +517,8 @@ classDiagram
     SynergyLookupResponse "1" *-- "many" SynergyResult
     DatabaseService ..> CardORM : uses
     CardORM ..> MTGCard : converts to
-    CAGCache "1" *-- "many" MTGCard
-    AgentOrchestrator ..> UserQuery : processes
-    AgentOrchestrator ..> FusedResponse : produces
+    AgentOrchestratorV2 ..> UserQuery : processes
+    AgentOrchestratorV2 ..> FusedResponse : produces
 
     %% ============================================================================
     %% CONFIGURATION
@@ -550,10 +546,11 @@ classDiagram
     %% ============================================================================
     %% NOTES
     %% ============================================================================
-    note for IAgent "Interface Segregation:\nAll agents implement\ncommon contract via IAgent"
+    note for IAgent "Interface Segregation:\nAll agents handle both dict (v1)\nand Pydantic request objects (v2)"
     note for ICardRepository "Repository Pattern:\nAbstracts data access\nwith cache + DB fallback"
-    note for CardRepository "Two-tier lookup:\n1. ICache (O(1) hot cards)\n2. DatabaseService (O(log n) full DB)"
+    note for CardRepository "Two-tier lookup:\n1. ICache.set() (O(1) hot cards)\n2. DatabaseService (O(log n) full DB)"
     note for MultiTierCache "L1: Hot queries (Dict)\nL2: Warm queries (Dict)\nL3: Cold queries (Dict)\nAuto-promotion on access"
-    note for DeckBuilderServiceV2 "Iterative deck building:\n1. Fetch candidate cards via repository\n2. Score cards by archetype\n3. Analyze with IAnalyzer\n4. Validate with IValidator\n5. Repeat until deck complete\nOptional vector store integration"
-    note for SynergyLookupService "Semantic synergy search:\n1. Resolve card name via CardRepository\n2. Query VectorStoreService for embeddings\n3. Apply optional format/archetype filters\n4. Return sorted results by similarity\n5. Convert distances to similarity scores (0-1)"
-    note for AgentOrchestratorV2 "Simplified orchestration:\n1. Route by query type\n2. Delegate to agents\n3. Fuse results\nNote: Not yet pipeline-based,\nno circuit breaker or retry patterns"
+    note for DeckBuilderServiceV2 "Iterative deck building:\n1. Fetch candidate cards via repository\n2. Score cards by archetype\n3. Analyze with IAnalyzer (if available)\n4. Validate with IValidator (optional)\n5. Repeat up to max_iterations\nAnalyzer optional: None-safe implementation"
+    note for PatternSynergyService "Pattern complementarity matching:\n1. Extract synergy patterns from oracle text\n2. Match mechanical patterns (trigger ↔ payoff)\n3. Score by pattern complement strength\nReplaces semantic similarity approach"
+    note for SynergyLookupService "Pattern-based synergy lookup:\n1. Resolve card name via CardRepository\n2. Query PatternSynergyService for patterns\n3. Apply optional format/archetype filters\n4. Return sorted results by synergy score\n5. Ignore card names, match mechanics"
+    note for AgentOrchestratorV2 "End-to-end orchestration:\n1. Route by query type (classification)\n2. Delegate to specialized agents\n3. DeckBuilderServiceV2 for deck building\n4. Fuse results into FusedResponse\nDeck builder fully initialized and functional"
