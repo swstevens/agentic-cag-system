@@ -57,7 +57,7 @@ class CardRepository(ICardRepository):
         card = self.database.get_card_by_name(name)
         if card:
             # Promote to cache for future hits
-            self.cache.put(cache_key, card)
+            self.cache.set(cache_key, card)
             return card
 
         return None
@@ -116,7 +116,7 @@ class CardRepository(ICardRepository):
         for card in cards[:10]:  # Cache top 10 results
             cache_key = card.name.lower()
             if not self.cache.get(cache_key):
-                self.cache.put(cache_key, card)
+                self.cache.set(cache_key, card)
 
         return cards
 
@@ -137,7 +137,7 @@ class CardRepository(ICardRepository):
         for card in cards:
             cache_key = card.name.lower()
             if not self.cache.get(cache_key):
-                self.cache.put(cache_key, card)
+                self.cache.set(cache_key, card)
 
         return cards
 
@@ -155,7 +155,7 @@ class CardRepository(ICardRepository):
             if not self.cache.get(cache_key):
                 card = self.database.get_card_by_name(name)
                 if card:
-                    self.cache.put(cache_key, card)
+                    self.cache.set(cache_key, card)
 
     def get_stats(self) -> dict:
         """

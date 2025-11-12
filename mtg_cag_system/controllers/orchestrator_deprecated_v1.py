@@ -31,7 +31,8 @@ class AgentOrchestrator:
         self.deck_builder = DeckBuilderService(
             knowledge_agent=knowledge_agent,
             symbolic_agent=symbolic_agent,
-            card_lookup=knowledge_agent.card_lookup  # Use the CardLookupService instance from KnowledgeFetchAgent
+            card_lookup=knowledge_agent.card_lookup,  # Use the CardLookupService instance from KnowledgeFetchAgent
+            max_iterations=50  # Increased to 50 iterations to ensure we build a complete 60-card deck
         )
 
         # Initialize synergy lookup service

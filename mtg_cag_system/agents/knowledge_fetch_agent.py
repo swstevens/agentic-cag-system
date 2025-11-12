@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 import os
 from pydantic_ai import Agent
 from .base_agent import BaseAgent
@@ -6,6 +6,7 @@ from ..models.agent import AgentType
 from ..models.response import AgentResponse
 from ..services.card_lookup_service import CardLookupService
 from ..models.card import MTGCard
+from ..models.requests import KnowledgeRequest
 
 
 class KnowledgeFetchAgent(BaseAgent):
@@ -29,16 +30,21 @@ class KnowledgeFetchAgent(BaseAgent):
             Be precise and only extract actual card names."""
         )
 
-    async def process(self, input_data: Dict[str, Any]) -> AgentResponse:
+    async def process(self, input_data: Union[Dict[str, Any], KnowledgeRequest]) -> AgentResponse:
         """
         Fetch card data using two-tier lookup (Public API)
-        
+
         Returns ONLY MTGCard schema data, no generated text.
         """
         self.update_state("processing", "Fetching cards")
 
-        query = input_data.get("query", "")
-        use_fuzzy = input_data.get("use_fuzzy", False)
+        # Handle both dict and Pydantic request objects
+        if isinstance(input_data, KnowledgeRequest):
+            query = input_data.query_text
+            use_fuzzy = input_data.fuzzy_search
+        else:
+            query = input_data.get("query", "")
+            use_fuzzy = input_data.get("use_fuzzy", False)
 
         try:
             # Step 1: Use LLM to extract card names from the query

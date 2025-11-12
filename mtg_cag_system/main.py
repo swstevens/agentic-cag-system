@@ -14,10 +14,12 @@ from .services.knowledge_service import KnowledgeService
 from .services.database_service import DatabaseService
 from .services.card_lookup_service import CardLookupService
 from .services.vector_store_service import VectorStoreService
+from .services.deck_builder_service_v2 import DeckBuilderServiceV2
 from .agents.scheduling_agent import SchedulingAgent
 from .agents.knowledge_fetch_agent import KnowledgeFetchAgent
 from .agents.symbolic_reasoning_agent import SymbolicReasoningAgent
-from .controllers.orchestrator import AgentOrchestrator
+from .controllers.orchestrator_v2 import AgentOrchestratorV2
+from .repositories.card_repository import CardRepository
 from .routers.api import router
 
 
@@ -116,12 +118,40 @@ async def lifespan(app: FastAPI):
         api_key=settings.openai_api_key
     )
 
-    # Initialize orchestrator
-    orchestrator = AgentOrchestrator(
+    # Initialize deck builder service with dependencies
+    deck_builder = None
+    if db:
+        try:
+            # Create repository
+            card_repository = CardRepository(cache=cache, database_service=db)
+
+            # For now, skip the LLM analyzer due to initialization issues
+            # Will use DeckBuilderServiceV2 with basic rule-based analysis
+            # TODO: Fix LLM analyzer initialization and use it
+
+            # Create deck builder with all dependencies
+            # Note: Using None for analyzer for now - may need to create a basic rule-based analyzer
+            deck_builder = DeckBuilderServiceV2(
+                repository=card_repository,
+                analyzer=None,  # TODO: Implement or fix LLMDeckAnalyzer
+                validator=None,  # Optional validator not yet needed
+                max_iterations=25,  # User requested 25 iterations
+                vector_store=vector_store
+            )
+            print("✅ Deck builder service initialized (analyzer disabled)")
+        except Exception as e:
+            print(f"⚠️  Failed to initialize deck builder: {e}")
+            import traceback
+            traceback.print_exc()
+            deck_builder = None
+
+    # Initialize orchestrator (v2)
+    orchestrator = AgentOrchestratorV2(
         scheduling_agent=scheduling_agent,
         knowledge_agent=knowledge_agent,
         symbolic_agent=symbolic_agent,
-        cache=cache
+        cache=cache,
+        deck_builder=deck_builder
     )
 
     # Store in app state

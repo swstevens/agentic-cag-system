@@ -1,9 +1,10 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import os
 from pydantic_ai import Agent
 from .base_agent import BaseAgent
 from ..models.agent import AgentType
 from ..models.response import AgentResponse
+from ..models.requests import ReasoningRequest
 
 
 class SymbolicReasoningAgent(BaseAgent):
@@ -28,12 +29,17 @@ class SymbolicReasoningAgent(BaseAgent):
             Always provide definitive yes/no answers with clear reasoning."""
         )
 
-    async def process(self, input_data: Dict[str, Any]) -> AgentResponse:
+    async def process(self, input_data: Union[Dict[str, Any], ReasoningRequest]) -> AgentResponse:
         """Apply symbolic reasoning to validate or solve"""
         self.update_state("processing", "Applying symbolic reasoning")
 
-        reasoning_type = input_data.get("type", "validation")
-        data = input_data.get("data", {})
+        # Handle both dict and Pydantic request objects
+        if isinstance(input_data, ReasoningRequest):
+            reasoning_type = input_data.reasoning_type
+            data = input_data.data
+        else:
+            reasoning_type = input_data.get("type", "validation")
+            data = input_data.get("data", {})
 
         try:
             if reasoning_type == "deck_validation":

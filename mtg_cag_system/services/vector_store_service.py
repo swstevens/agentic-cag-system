@@ -3,8 +3,14 @@ Vector Store Service for MTG Card Similarity Search
 
 This service uses ChromaDB to store and query card embeddings.
 Embeddings are computed once and persisted to disk for reuse.
+
+Synergy Mode:
+This service can be configured to use synergy-focused embeddings that capture
+mechanical interactions between cards rather than just mechanical similarity.
+This requires synergy patterns to be pre-extracted via scripts/extract_synergy_patterns.py
 """
 
+import json
 import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -32,7 +38,8 @@ class VectorStoreService:
         self,
         persist_directory: str = "./data/chroma",
         collection_name: str = "mtg_cards",
-        embedding_model: str = "all-MiniLM-L6-v2"
+        embedding_model: str = "all-MiniLM-L6-v2",
+        synergy_patterns_path: Optional[str] = "./data/synergy_patterns.json"
     ):
         """
         Initialize vector store service
@@ -41,9 +48,24 @@ class VectorStoreService:
             persist_directory: Directory to persist embeddings
             collection_name: Name of the ChromaDB collection
             embedding_model: Sentence transformer model name
+            synergy_patterns_path: Path to synergy patterns JSON file (optional)
         """
         self.persist_directory = Path(persist_directory)
         self.collection_name = collection_name
+        self.synergy_patterns = {}
+
+        # Load synergy patterns if available
+        if synergy_patterns_path:
+            synergy_path = Path(synergy_patterns_path)
+            if synergy_path.exists():
+                try:
+                    with open(synergy_path, 'r') as f:
+                        self.synergy_patterns = json.load(f)
+                    logger.info(f"Loaded synergy patterns for {len(self.synergy_patterns)} cards")
+                except Exception as e:
+                    logger.warning(f"Could not load synergy patterns: {e}")
+            else:
+                logger.debug(f"Synergy patterns file not found at {synergy_patterns_path}")
 
         # Create persist directory if it doesn't exist
         self.persist_directory.mkdir(parents=True, exist_ok=True)
@@ -75,7 +97,7 @@ class VectorStoreService:
         Create searchable text representation of a card
 
         Combines multiple card attributes to create a rich text representation
-        that captures mechanics, types, and effects.
+        that captures mechanics, types, effects, and synergy signals.
 
         Args:
             card: MTGCard to convert to text
@@ -116,6 +138,13 @@ class VectorStoreService:
         if card.subtypes:
             parts.append(f"Subtypes: {', '.join(card.subtypes)}")
 
+        # Synergy signals (if available)
+        if card.name in self.synergy_patterns:
+            synergy_data = self.synergy_patterns[card.name]
+            synergy_text = synergy_data.get("synergy_text", "")
+            if synergy_text:
+                parts.append(f"Synergy: {synergy_text}")
+
         return " | ".join(parts)
 
     def _create_metadata(self, card: MTGCard) -> Dict[str, Any]:
@@ -147,7 +176,8 @@ class VectorStoreService:
         self,
         database_service: DatabaseService,
         batch_size: int = 1000,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
+        force_rebuild: bool = False
     ):
         """
         Build embeddings for all cards in the database (ONE-TIME OPERATION)
@@ -159,12 +189,29 @@ class VectorStoreService:
             database_service: Database service to fetch cards from
             batch_size: Number of cards to process at once
             progress_callback: Optional callback(current, total) for progress
+            force_rebuild: Force rebuild even if embeddings exist (useful when synergy patterns change)
         """
-        if self.is_initialized():
-            logger.warning("Embeddings already exist. Skipping build.")
+        if self.is_initialized() and not force_rebuild:
+            logger.warning("Embeddings already exist. Skipping build. Use force_rebuild=True to override.")
             return
 
+        if force_rebuild and self.is_initialized():
+            logger.info("Force rebuild requested. Clearing existing embeddings...")
+            try:
+                # Delete and recreate collection
+                self.client.delete_collection(name=self.collection_name)
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    embedding_function=self.embedding_function,
+                    metadata={"description": "MTG card embeddings for synergy search"}
+                )
+                logger.info("Existing embeddings cleared.")
+            except Exception as e:
+                logger.warning(f"Could not clear embeddings: {e}")
+
         logger.info("Building embeddings for all cards (this may take a while)...")
+        if self.synergy_patterns:
+            logger.info(f"Using synergy patterns from {len(self.synergy_patterns)} cards")
 
         # Get total count
         total_cards = database_service.card_count()
@@ -206,6 +253,8 @@ class VectorStoreService:
                 progress_callback(processed, total_cards)
 
         logger.info(f"✅ Embeddings built for {processed} cards and persisted to disk")
+        if self.synergy_patterns:
+            logger.info(f"✅ Synergy patterns integrated for enhanced similarity search")
 
     def find_similar_cards(
         self,

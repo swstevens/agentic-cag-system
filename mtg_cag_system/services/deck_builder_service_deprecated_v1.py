@@ -296,8 +296,8 @@ class DeckBuilderService:
         legal_cards = self.card_lookup._CardLookupService__database.search_cards(
             colors=colors,
             format_legality=format_legality,
-            strict_colors=True,  # Only cards with exactly these colors (no multicolor)
-            limit=1000  # High limit to get good coverage
+            strict_colors=False,  # Allow cards in any of these colors, not just exactly these colors
+            limit=2000  # Higher limit to get better coverage for deck building
         )
         print(f"Found {len(legal_cards)} legal cards for {deck_format} format")
 
@@ -316,7 +316,12 @@ class DeckBuilderService:
             card_type = (card.type_line or "").lower()
 
             # Separate basic lands from other cards
-            is_basic_land = 'basic land' in card_type or card.name in ['Mountain', 'Island', 'Plains', 'Swamp', 'Forest', 'Wastes']
+            # Check for basic lands by type line or known land names
+            is_basic_land = (
+                'basic land' in card_type or
+                card.name in ['Mountain', 'Island', 'Plains', 'Swamp', 'Forest', 'Wastes'] or
+                card_type in ['land', 'basic land — mountain', 'basic land — island', 'basic land — plains', 'basic land — swamp', 'basic land — forest']
+            )
 
             if is_basic_land:
                 basic_lands.append(card)
@@ -385,7 +390,7 @@ class DeckBuilderService:
         Returns:
             List of land cards distributed across colors
         """
-        if len(colors) == 0:
+        if len(colors) == 0 or total_lands_needed == 0:
             return []
 
         # Normalize colors to single-letter codes
@@ -395,6 +400,7 @@ class DeckBuilderService:
             normalized_colors.append(normalized_color)
 
         print(f"    DEBUG: Original colors: {colors}, Normalized: {normalized_colors}, Total lands needed: {total_lands_needed}")
+        print(f"    DEBUG: Available basic lands: {len(basic_lands)}")
 
         basic_land_map = {
             'W': 'Plains',
@@ -416,6 +422,11 @@ class DeckBuilderService:
 
             if matching_lands:
                 land_cards = matching_lands[:1] * total_lands_needed
+            else:
+                # Fallback: use any land available or create placeholder
+                if basic_lands:
+                    land_cards = basic_lands[:1] * total_lands_needed
+                    print(f"    DEBUG: Using fallback land {basic_lands[0].name} instead")
         else:
             # Multi-color: distribute evenly
             lands_per_color = total_lands_needed // len(normalized_colors)
@@ -434,6 +445,11 @@ class DeckBuilderService:
                     lands_for_this_color = lands_per_color + (1 if i < remainder else 0)
                     land_cards.extend(matching_lands[:1] * lands_for_this_color)
                     print(f"    DEBUG: Adding {lands_for_this_color}x {basic_land_name}")
+                elif basic_lands:
+                    # Fallback: use any available land for this color
+                    lands_for_this_color = lands_per_color + (1 if i < remainder else 0)
+                    land_cards.extend(basic_lands[:1] * lands_for_this_color)
+                    print(f"    DEBUG: Using fallback land {basic_lands[0].name} for {color_code}")
 
         print(f"    DEBUG: Total land cards returned: {len(land_cards)}")
         return land_cards

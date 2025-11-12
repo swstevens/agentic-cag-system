@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import json
 import os
 import re
@@ -6,6 +6,7 @@ from pydantic_ai import Agent
 from .base_agent import BaseAgent
 from ..models.agent import AgentType
 from ..models.response import AgentResponse
+from ..models.requests import SchedulingRequest
 
 
 class SchedulingAgent(BaseAgent):
@@ -50,12 +51,17 @@ class SchedulingAgent(BaseAgent):
             }"""
         )
 
-    async def process(self, input_data: Dict[str, Any]) -> AgentResponse:
+    async def process(self, input_data: Union[Dict[str, Any], SchedulingRequest]) -> AgentResponse:
         """Process query and create execution plan"""
         self.update_state("processing", "Creating execution plan")
 
-        query = input_data.get("query", "")
-        context = input_data.get("context", {})
+        # Handle both dict and Pydantic request objects
+        if isinstance(input_data, SchedulingRequest):
+            query = input_data.query_text
+            context = input_data.user_context
+        else:
+            query = input_data.get("query", "")
+            context = input_data.get("context", {})
 
         try:
             # Use Pydantic AI agent to analyze query
@@ -135,7 +141,13 @@ class SchedulingAgent(BaseAgent):
                         "format": detected_format,
                         "colors": detected_colors,
                         "strategy": "aggro" if "aggro" in query_lower else "midrange",
-                        "next_steps": ["Process query based on type"]
+                        "next_steps": ["Process query based on type"],
+                        "extracted_requirements": {
+                            "format": detected_format,
+                            "colors": detected_colors,
+                            "strategy": "aggro" if "aggro" in query_lower else "midrange"
+                        },
+                        "confidence": 0.9
                     }
             except Exception as parse_error:
                 print(f"Error parsing response: {parse_error}")
@@ -193,7 +205,13 @@ class SchedulingAgent(BaseAgent):
                     "format": detected_format,
                     "colors": detected_colors,
                     "strategy": "aggro" if "aggro" in query_lower else "midrange",
-                    "next_steps": ["Process query with default handling"]
+                    "next_steps": ["Process query with default handling"],
+                    "extracted_requirements": {
+                        "format": detected_format,
+                        "colors": detected_colors,
+                        "strategy": "aggro" if "aggro" in query_lower else "midrange"
+                    },
+                    "confidence": 0.8
                 }
 
             # Return structured response

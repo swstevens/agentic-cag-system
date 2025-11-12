@@ -1,5 +1,5 @@
-from .orchestrator import AgentOrchestrator
+from .orchestrator_v2 import AgentOrchestratorV2
 
 __all__ = [
-    "AgentOrchestrator",
+    "AgentOrchestratorV2",
 ]

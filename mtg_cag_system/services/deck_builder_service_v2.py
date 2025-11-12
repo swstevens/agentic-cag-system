@@ -146,18 +146,24 @@ class DeckBuilderServiceV2:
                 print(f"\n⚠️  Reached maximum iterations ({self.max_iterations})")
                 break
 
-        # Analyze final deck
-        print(f"\n{'=' * 80}")
-        print("ANALYZING DECK QUALITY")
-        print(f"{'=' * 80}")
+        # Analyze final deck (if analyzer is available)
+        analysis_result = None
+        if self.analyzer:
+            print(f"\n{'=' * 80}")
+            print("ANALYZING DECK QUALITY")
+            print(f"{'=' * 80}")
 
-        analysis_context = AnalysisContext(
-            archetype=archetype,
-            format=deck_format,
-            target_deck_size=target_size
-        )
+            analysis_context = AnalysisContext(
+                archetype=archetype,
+                format=deck_format,
+                target_deck_size=target_size
+            )
 
-        analysis_result = await self.analyzer.analyze(self._deck, analysis_context)
+            analysis_result = await self.analyzer.analyze(self._deck, analysis_context)
+        else:
+            print(f"\n{'=' * 80}")
+            print("DECK BUILD COMPLETE (Analysis skipped - analyzer not available)")
+            print(f"{'=' * 80}")
 
         # Return results
         return {
