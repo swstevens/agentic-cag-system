@@ -182,3 +182,4 @@ data/cards.db
 data/AtomicCards.json
 data/cards_atomic.db
 data/chroma/
+/v3/data/*
