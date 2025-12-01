@@ -78,25 +78,34 @@ class BuildInitialDeckNode(BaseNode):
     """
 
     async def run(self, ctx: GraphRunContext[StateData]) -> Union["VerifyQualityNode", End]:
-        """Build initial deck draft."""
+        """Build initial deck draft using LLM agent."""
         try:
             request = ctx.state.request
             if not request:
                 raise ValueError("No request found in state")
 
-            # Get services from dependencies
-            deck_builder: DeckBuilderService = ctx.deps.get("deck_builder")
+            # Try agent-based builder first
+            agent_builder = ctx.deps.get("agent_deck_builder")
+            if agent_builder:
+                iteration_state = ctx.state.iteration_state
+                iteration_state.iteration_count += 1
+                
+                deck = await agent_builder.build_initial_deck(request)
+                ctx.state.current_deck = deck
+                
+                return VerifyQualityNode()
+            
+            # Fallback to heuristic builder
+            deck_builder = ctx.deps.get("deck_builder")
             if not deck_builder:
-                raise ValueError("DeckBuilderService not found in dependencies")
+                raise ValueError("No deck builder service found in dependencies")
 
             iteration_state = ctx.state.iteration_state
             iteration_state.iteration_count += 1
 
-            # Build initial deck
             deck = deck_builder.build_initial_deck(request)
             ctx.state.current_deck = deck
 
-            # Transition to verify quality state
             return VerifyQualityNode()
         except Exception as e:
             ctx.state.errors.append(f"Build initial deck error: {str(e)}")
@@ -113,23 +122,17 @@ class RefineDeckNode(BaseNode):
     """
 
     async def run(self, ctx: GraphRunContext[StateData]) -> Union["VerifyQualityNode", End]:
-        """Refine deck based on suggestions."""
+        """Refine deck using LLM agent reasoning."""
         try:
             request = ctx.state.request
             if not request:
                 raise ValueError("No request found in state")
 
-            # Get services from dependencies
-            deck_builder: DeckBuilderService = ctx.deps.get("deck_builder")
-            if not deck_builder:
-                raise ValueError("DeckBuilderService not found in dependencies")
+            if ctx.state.current_deck is None:
+                raise ValueError("No current deck to refine")
 
             iteration_state = ctx.state.iteration_state
             iteration_state.iteration_count += 1
-
-            # Refine deck
-            if ctx.state.current_deck is None:
-                raise ValueError("No current deck to refine")
 
             suggestions = (
                 ctx.state.latest_quality.suggestions
@@ -137,12 +140,31 @@ class RefineDeckNode(BaseNode):
                 else []
             )
             
+            improvement_plan = (
+                ctx.state.latest_quality.improvement_plan
+                if ctx.state.latest_quality
+                else None
+            )
+            
+            # Try agent-based builder first
+            agent_builder = ctx.deps.get("agent_deck_builder")
+            if agent_builder:
+                deck = await agent_builder.refine_deck(
+                    ctx.state.current_deck, suggestions, request, improvement_plan
+                )
+                ctx.state.current_deck = deck
+                return VerifyQualityNode()
+            
+            # Fallback to heuristic builder
+            deck_builder = ctx.deps.get("deck_builder")
+            if not deck_builder:
+                raise ValueError("No deck builder service found in dependencies")
+            
             deck = deck_builder.refine_deck(
-                ctx.state.current_deck, suggestions, request
+                ctx.state.current_deck, suggestions, request, improvement_plan
             )
             ctx.state.current_deck = deck
 
-            # Transition to verify quality state
             return VerifyQualityNode()
         except Exception as e:
             ctx.state.errors.append(f"Refine deck error: {str(e)}")
@@ -171,7 +193,7 @@ class VerifyQualityNode(BaseNode):
                 raise ValueError("QualityVerifierService not found in dependencies")
 
             # Verify deck quality
-            quality_metrics = quality_verifier.verify_deck(deck)
+            quality_metrics = await quality_verifier.verify_deck(deck)
             ctx.state.latest_quality = quality_metrics
 
             # Record this iteration

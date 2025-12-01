@@ -96,6 +96,27 @@ class Deck(BaseModel):
         return [dc for dc in self.cards if dc.card.cmc == cmc]
 
 
+class CardRemoval(BaseModel):
+    """Recommendation to remove a card."""
+    card_name: str = Field(..., description="Name of the card to remove")
+    reason: str = Field(..., description="Reason for removal")
+    quantity: int = Field(..., ge=1, description="Number of copies to remove")
+
+
+class CardSuggestion(BaseModel):
+    """Recommendation to add a card."""
+    card_name: str = Field(..., description="Name of the card to add")
+    reason: str = Field(..., description="Reason for addition")
+    quantity: int = Field(..., ge=1, description="Number of copies to add")
+
+
+class DeckImprovementPlan(BaseModel):
+    """Structured plan for deck improvement."""
+    removals: List[CardRemoval] = Field(default_factory=list, description="Cards to remove")
+    additions: List[CardSuggestion] = Field(default_factory=list, description="Cards to add")
+    analysis: str = Field(..., description="Overall analysis of why these changes are needed")
+
+
 class DeckQualityMetrics(BaseModel):
     """Quality metrics for deck analysis."""
     mana_curve_score: float = Field(..., ge=0.0, le=1.0, description="Mana curve quality (0-1)")
@@ -105,6 +126,7 @@ class DeckQualityMetrics(BaseModel):
     overall_score: float = Field(..., ge=0.0, le=1.0, description="Overall quality score (0-1)")
     issues: List[str] = Field(default_factory=list, description="Identified issues")
     suggestions: List[str] = Field(default_factory=list, description="Improvement suggestions")
+    improvement_plan: Optional[DeckImprovementPlan] = Field(None, description="LLM-generated improvement plan")
     
     def calculate_overall(self) -> None:
         """Calculate overall score as weighted average."""

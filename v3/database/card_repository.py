@@ -9,6 +9,7 @@ from typing import List, Optional
 from ..database.database_service import DatabaseService
 from ..models.deck import MTGCard, CardSearchFilters
 from ..caching import ICache, LRUCache
+from ..services.vector_service import VectorService
 
 
 class CardRepository:
@@ -25,6 +26,7 @@ class CardRepository:
         self,
         database_service: DatabaseService,
         cache: Optional[ICache] = None,
+        vector_service: Optional[VectorService] = None,
         cache_size: int = 2000
     ):
         """
@@ -33,10 +35,12 @@ class CardRepository:
         Args:
             database_service: Database service instance
             cache: Optional cache instance (creates LRUCache if None)
+            vector_service: Optional vector service for semantic search
             cache_size: Cache size if creating default cache
         """
         self.db = database_service
         self.cache = cache or LRUCache(max_size=cache_size)
+        self.vector_service = vector_service
     
     def get_by_name(self, name: str) -> Optional[MTGCard]:
         """
@@ -120,6 +124,74 @@ class CardRepository:
                 self.cache.put(card.name, card)
         
         return cards
+
+    def semantic_search(self, query: str, filters: Optional[CardSearchFilters] = None, limit: int = 20) -> List[MTGCard]:
+        """
+        Perform semantic search using vector embeddings + filters.
+        
+        Args:
+            query: Natural language query
+            filters: Optional hard filters (colors, types, etc.)
+            limit: Maximum results
+            
+        Returns:
+            List of matching MTGCard objects
+        """
+        if not self.vector_service:
+            print("Warning: Vector service not initialized. Falling back to text search.")
+            if filters:
+                filters.text_query = query
+                return self.search(filters)
+            return []
+            
+        # 1. Get candidate IDs from vector search
+        # Fetch more than limit to allow for post-filtering
+        candidate_ids = self.vector_service.search(query, limit=limit * 5)
+        
+        if not candidate_ids:
+            return []
+            
+        # 2. Fetch full card data for candidates
+        cards = []
+        for card_id in candidate_ids:
+            card = self.get_by_id(card_id)
+            if card:
+                cards.append(card)
+                
+        # 3. Apply hard filters if provided
+        if filters:
+            filtered_cards = []
+            for card in cards:
+                matches = True
+                
+                # Check colors (at least one matching color)
+                if filters.colors:
+                    if not any(c in card.colors for c in filters.colors):
+                        matches = False
+                        
+                # Check types
+                if filters.types and matches:
+                    if not any(t in card.types for t in filters.types):
+                        matches = False
+                        
+                # Check CMC
+                if filters.cmc_min is not None and matches:
+                    if card.cmc < filters.cmc_min:
+                        matches = False
+                if filters.cmc_max is not None and matches:
+                    if card.cmc > filters.cmc_max:
+                        matches = False
+                        
+                # Check format legality
+                if filters.format_legal and matches:
+                    if card.legalities.get(filters.format_legal.lower()) != "Legal":
+                        matches = False
+                        
+                if matches:
+                    filtered_cards.append(card)
+            cards = filtered_cards
+            
+        return cards[:limit]
     
     def get_cards_by_type(self, card_type: str, limit: int = 100) -> List[MTGCard]:
         """

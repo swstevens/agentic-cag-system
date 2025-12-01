@@ -229,15 +229,34 @@ class DatabaseService:
                 query += " AND LOWER(rarity) = LOWER(?)"
                 params.append(rarity)
             
+            if format_legal:
+            # Add SQL filtering for format legality to ensure we get relevant cards
+            # Legalities are stored as JSON: {"standard": "Legal", ...}
+                query += " AND LOWER(legalities) LIKE ?"
+                params.append(f'%"{format_legal.lower()}": "legal"%')
+        
+            if colors:
+            # Add SQL filtering for colors
+            # Colors are stored as JSON list: ["R", "G"]
+            # We want to find cards that have at least one of the requested colors
+            # This is a loose filter, strict checking happens in Python
+                color_conditions = []
+                for color in colors:
+                    color_conditions.append("colors LIKE ?")
+                    params.append(f'%"{color}"%')
+                
+                if color_conditions:
+                    query += f" AND ({' OR '.join(color_conditions)})"
+
             if text_query:
                 query += " AND LOWER(oracle_text) LIKE LOWER(?)"
                 params.append(f"%{text_query}%")
-            
+        
             # Note: Color and type filtering requires JSON parsing
             # For now, we'll do post-filtering in Python
             
             query += f" LIMIT ?"
-            params.append(limit * 2)  # Fetch more for post-filtering
+            params.append(limit * 10)  # Fetch more for post-filtering (increased from 2 to 10)
             
             cursor.execute(query, params)
             rows = cursor.fetchall()

@@ -12,6 +12,7 @@ from ..database.database_service import DatabaseService
 from ..database.card_repository import CardRepository
 from ..services.deck_builder_service import DeckBuilderService
 from ..services.quality_verifier_service import QualityVerifierService
+from ..services.vector_service import VectorService
 
 
 class FSMOrchestrator:
@@ -39,9 +40,36 @@ class FSMOrchestrator:
         """
         # Initialize database and services
         self.db_service = database_service or DatabaseService(db_path)
-        self.card_repo = CardRepository(self.db_service)
+        
+        # Initialize Vector Service
+        try:
+            self.vector_service = VectorService()
+            print("✓ Vector service initialized")
+        except Exception as e:
+            print(f"Warning: Failed to initialize VectorService: {e}")
+            self.vector_service = None
+            
+        self.card_repo = CardRepository(self.db_service, vector_service=self.vector_service)
         self.deck_builder = DeckBuilderService(self.card_repo)
-        self.quality_verifier = QualityVerifierService()
+        
+        # Initialize LLM service
+        try:
+            from ..services.llm_service import LLMService
+            self.llm_service = LLMService()
+        except Exception as e:
+            print(f"Warning: Failed to initialize LLMService: {e}")
+            self.llm_service = None
+            
+        self.quality_verifier = QualityVerifierService(self.llm_service)
+        
+        # Initialize agent-based deck builder
+        try:
+            from ..services.agent_deck_builder_service import AgentDeckBuilderService
+            self.agent_deck_builder = AgentDeckBuilderService(self.card_repo)
+            print("✓ Agent-based deck builder initialized")
+        except Exception as e:
+            print(f"Warning: Failed to initialize AgentDeckBuilderService: {e}")
+            self.agent_deck_builder = None
         
         # Create the graph with ALL node types
         self.graph = Graph(nodes=[
@@ -66,6 +94,7 @@ class FSMOrchestrator:
         # Create dependencies dict with services
         deps = {
             "deck_builder": self.deck_builder,
+            "agent_deck_builder": self.agent_deck_builder,
             "quality_verifier": self.quality_verifier,
             "card_repository": self.card_repo,
             "database_service": self.db_service,

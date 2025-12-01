@@ -5,8 +5,9 @@ Analyzes deck quality across multiple dimensions and
 provides improvement suggestions for iteration.
 """
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 from ..models.deck import Deck, DeckQualityMetrics, DeckCard
+from .llm_service import LLMService
 
 
 class QualityVerifierService:
@@ -17,7 +18,16 @@ class QualityVerifierService:
     to determine if a deck meets quality thresholds.
     """
     
-    def verify_deck(self, deck: Deck) -> DeckQualityMetrics:
+    def __init__(self, llm_service: Optional[LLMService] = None):
+        """
+        Initialize quality verifier.
+        
+        Args:
+            llm_service: Optional LLM service for intelligent analysis
+        """
+        self.llm_service = llm_service
+    
+    async def verify_deck(self, deck: Deck) -> DeckQualityMetrics:
         """
         Verify deck quality across all dimensions.
         
@@ -35,13 +45,37 @@ class QualityVerifierService:
             overall_score=0.0,
             issues=[],
             suggestions=[],
+            improvement_plan=None
         )
         
         metrics.calculate_overall()
         
-        # Generate issues and suggestions
+        # Generate issues and suggestions (heuristics)
         metrics.issues = self._identify_issues(deck, metrics)
         metrics.suggestions = self._generate_suggestions(deck, metrics)
+        
+        # LLM Analysis (if available)
+        if self.llm_service:
+            try:
+                plan = await self.llm_service.analyze_deck(deck)
+                metrics.improvement_plan = plan
+                
+                # Merge LLM suggestions into main list
+                if plan.analysis:
+                    metrics.suggestions.append(f"LLM Analysis: {plan.analysis}")
+                
+                for addition in plan.additions:
+                    metrics.suggestions.append(
+                        f"Add {addition.quantity}x {addition.card_name}: {addition.reason}"
+                    )
+                
+                for removal in plan.removals:
+                    metrics.suggestions.append(
+                        f"Remove {removal.quantity}x {removal.card_name}: {removal.reason}"
+                    )
+                    
+            except Exception as e:
+                metrics.issues.append(f"LLM analysis failed: {str(e)}")
         
         return metrics
     

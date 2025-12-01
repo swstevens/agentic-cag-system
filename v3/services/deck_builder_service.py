@@ -13,6 +13,7 @@ from ..models.deck import (
     MTGCard,
     DeckBuildRequest,
     CardSearchFilters,
+    DeckImprovementPlan,
 )
 from ..database.card_repository import CardRepository
 
@@ -74,7 +75,8 @@ class DeckBuilderService:
         self,
         deck: Deck,
         suggestions: List[str],
-        request: DeckBuildRequest
+        request: DeckBuildRequest,
+        improvement_plan: Optional[DeckImprovementPlan] = None
     ) -> Deck:
         """
         Refine deck based on quality verification suggestions.
@@ -83,22 +85,76 @@ class DeckBuilderService:
             deck: Current deck
             suggestions: Improvement suggestions from quality verifier
             request: Original build request
+            improvement_plan: Optional structured improvement plan from LLM
             
         Returns:
             Refined deck
         """
-        # Parse suggestions and apply improvements
+        # 1. Apply LLM Improvement Plan if available
+        if improvement_plan:
+            # Remove cards
+            for removal in improvement_plan.removals:
+                deck = self._remove_card(deck, removal.card_name, removal.quantity)
+            
+            # Add cards
+            for addition in improvement_plan.additions:
+                deck = self._add_card(deck, addition.card_name, addition.quantity)
+        
+        # 2. Apply Heuristic Suggestions (fallback or supplementary)
+        # Only apply if no specific plan for that aspect
         for suggestion in suggestions:
-            if "mana curve" in suggestion.lower():
+            if "mana curve" in suggestion.lower() and not improvement_plan:
                 deck = self._adjust_mana_curve(deck, request)
-            elif "land" in suggestion.lower():
+            elif "land" in suggestion.lower() and not improvement_plan:
                 deck = self._adjust_lands(deck, request)
-            elif "synergy" in suggestion.lower():
+            elif "synergy" in suggestion.lower() and not improvement_plan:
                 deck = self._improve_synergy(deck, request)
         
         deck.calculate_totals()
         return deck
     
+    def _remove_card(self, deck: Deck, card_name: str, quantity: int) -> Deck:
+        """Remove specific card from deck."""
+        new_cards = []
+        removed_count = 0
+        
+        for deck_card in deck.cards:
+            if deck_card.card.name.lower() == card_name.lower():
+                if removed_count < quantity:
+                    # Reduce quantity or remove
+                    remaining = deck_card.quantity - (quantity - removed_count)
+                    if remaining > 0:
+                        deck_card.quantity = remaining
+                        new_cards.append(deck_card)
+                    removed_count += (deck_card.quantity - max(0, remaining))
+                else:
+                    new_cards.append(deck_card)
+            else:
+                new_cards.append(deck_card)
+        
+        deck.cards = new_cards
+        return deck
+
+    def _add_card(self, deck: Deck, card_name: str, quantity: int) -> Deck:
+        """Add specific card to deck."""
+        # Check if already in deck
+        for deck_card in deck.cards:
+            if deck_card.card.name.lower() == card_name.lower():
+                deck_card.quantity += quantity
+                return deck
+        
+        # Not in deck, fetch from repo
+        card = self.card_repo.get_by_name(card_name)
+        if card:
+            deck.cards.append(DeckCard(card=card, quantity=quantity))
+        else:
+            # Try fuzzy search if exact match fails
+            results = self.card_repo.search(CardSearchFilters(text_query=card_name, limit=1))
+            if results:
+                deck.cards.append(DeckCard(card=results[0], quantity=quantity))
+        
+        return deck
+
     def _select_lands(self, colors: List[str], count: int) -> List[DeckCard]:
         """
         Select appropriate lands for the deck.
