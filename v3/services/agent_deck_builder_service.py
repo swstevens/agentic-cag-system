@@ -71,6 +71,7 @@ class AgentDeckBuilderService:
             model_name: LLM model to use
         """
         self.card_repo = card_repository
+        self.current_request = None  # Store current request for tool access
         
         # Create agent for initial deck building
         self.build_agent = Agent(
@@ -149,6 +150,7 @@ Be specific and strategic. Focus on high-impact changes.
                 cmc_min=cmc_min,
                 cmc_max=cmc_max,
                 text_query=text_query,
+                format_legal=self.current_request.format if self.current_request else None,
                 limit=limit
             )
             
@@ -192,6 +194,7 @@ Be specific and strategic. Focus on high-impact changes.
                 cmc_min=cmc_min,
                 cmc_max=cmc_max,
                 text_query=text_query,
+                format_legal=self.current_request.format if self.current_request else None,
                 limit=limit
             )
             
@@ -242,6 +245,9 @@ Focus on building a synergistic spell suite. Provide a construction plan with yo
 """
         
         try:
+            # Store request for tool access
+            self.current_request = request
+            
             result = await self.build_agent.run(prompt)
             plan: DeckConstructionPlan = result.output
             
@@ -253,6 +259,8 @@ Focus on building a synergistic spell suite. Provide a construction plan with yo
             print(f"Agent deck building failed: {e}")
             # Fallback to simple construction
             return self._fallback_build(request)
+        finally:
+            self.current_request = None
     
     async def refine_deck(
         self,
@@ -313,6 +321,9 @@ Suggestions:
         prompt += "\nUse search_cards_refine to find better cards (use semantic_query for best results). Provide a refinement plan."
         
         try:
+            # Store request for tool access
+            self.current_request = request
+            
             result = await self.refine_agent.run(prompt)
             plan: RefinementPlan = result.output
             
@@ -324,6 +335,8 @@ Suggestions:
             print(f"Agent deck refinement failed: {e}")
             # Fallback to simple refinement
             return deck
+        finally:
+            self.current_request = None
     
     async def _execute_construction_plan(
         self,
@@ -415,6 +428,7 @@ Suggestions:
                     colors=request.colors,
                     types=["Creature"],
                     cmc_max=3.0,
+                    format_legal=request.format,
                     limit=50  # Get more candidates
                 )
                 filler_cards = self.card_repo.search(filters)
@@ -516,6 +530,7 @@ Suggestions:
                     colors=request.colors,
                     types=["Creature"],
                     cmc_max=3.0,
+                    format_legal=request.format,
                     limit=20
                 )
                 filler_cards = self.card_repo.search(filters)
