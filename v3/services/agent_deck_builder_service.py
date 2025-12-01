@@ -29,9 +29,8 @@ class CardSearchResult(BaseModel):
 class DeckConstructionPlan(BaseModel):
     """LLM's plan for constructing a deck."""
     strategy: str = Field(description="Overall strategy for deck construction")
-    land_count: int = Field(description="Number of lands to include")
     card_selections: List[Dict[str, Any]] = Field(
-        description="List of card selections with card_name, quantity, and reasoning"
+        description="List of SPELL card selections with card_name, quantity, and reasoning. Do NOT include lands."
     )
 
 
@@ -230,16 +229,16 @@ Be specific and strategic. Focus on high-impact changes.
         prompt = f"""Build a {request.archetype} deck for {request.format}.
 
 Colors: {', '.join(request.colors)}
-Deck size: {request.deck_size}
 Strategy: {request.strategy}
+
+IMPORTANT: You only need to select SPELL cards (creatures, instants, sorceries, etc.).
+Lands will be added automatically based on the archetype.
 
 Use the search_cards tool to find appropriate cards. 
 - Use semantic_query for high-level concepts (e.g. "synergistic goblin cards", "cheap removal")
 - Use standard filters for specific constraints
 
-Build a complete deck with lands and spells that work well together.
-
-Provide a construction plan with your reasoning.
+Focus on building a synergistic spell suite. Provide a construction plan with your reasoning.
 """
         
         try:
@@ -298,6 +297,19 @@ Suggestions:
             for addition in improvement_plan.additions:
                 prompt += f"- Add {addition.quantity}x {addition.card_name}: {addition.reason}\n"
         
+        if improvement_plan:
+            prompt += f"\nImprovement plan from quality analysis:\n"
+            prompt += f"Analysis: {improvement_plan.analysis}\n"
+            for removal in improvement_plan.removals:
+                prompt += f"- Remove {removal.quantity}x {removal.card_name}: {removal.reason}\n"
+            for addition in improvement_plan.additions:
+                prompt += f"- Add {addition.quantity}x {addition.card_name}: {addition.reason}\n"
+        
+        target_size = request.deck_size if request.deck_size > 0 else 60
+        prompt += f"\nIMPORTANT: Current deck size is {deck.total_cards}. Target size is {target_size}."
+        prompt += "\nIf current < target, you MUST add more cards than you remove."
+        prompt += "\nIf current > target, you MUST remove more cards than you add."
+        prompt += "\nIf current == target, you MUST add and remove equal amounts."
         prompt += "\nUse search_cards_refine to find better cards (use semantic_query for best results). Provide a refinement plan."
         
         try:
@@ -320,8 +332,6 @@ Suggestions:
     ) -> Deck:
         """Execute the LLM's construction plan."""
         print(f"Executing construction plan: {plan.strategy}")
-        print(f"Land count: {plan.land_count}")
-        print(f"Card selections: {len(plan.card_selections)} cards")
         
         deck = Deck(
             cards=[],
@@ -330,29 +340,20 @@ Suggestions:
             colors=request.colors,
         )
         
-        # Add cards from plan
-        for i, selection in enumerate(plan.card_selections):
-            card_name = selection.get("card_name")
-            quantity = selection.get("quantity", 1)
-            
-            if not card_name:
-                print(f"Warning: Selection {i} missing card_name: {selection}")
-                continue
-            
-            print(f"Adding {quantity}x {card_name}")
-            
-            # Get card from repository
-            card = self.card_repo.get_by_name(card_name)
-            if card:
-                deck.cards.append(DeckCard(card=card, quantity=quantity))
-            else:
-                print(f"Warning: Card '{card_name}' not found in repository")
+        # Determine target deck size based on format
+        target_size = self._get_target_deck_size(request.format, request.deck_size)
         
-        # Add lands based on plan.land_count
-        if plan.land_count > 0 and request.colors:
-            print(f"Adding {plan.land_count} lands")
-            lands_per_color = plan.land_count // len(request.colors)
-            remainder = plan.land_count % len(request.colors)
+        # Determine land count based on archetype
+        land_count = self._get_land_count(request.archetype, target_size)
+        
+        print(f"Target deck size: {target_size}")
+        print(f"Land count: {land_count}")
+        print(f"Spell slots: {target_size - land_count}")
+        
+        # STEP 1: Add lands first
+        if request.colors:
+            lands_per_color = land_count // len(request.colors)
+            remainder = land_count % len(request.colors)
             
             for i, color in enumerate(request.colors):
                 land_name = self._get_basic_land_name(color)
@@ -369,9 +370,118 @@ Suggestions:
                     quantity=quantity
                 ))
         
+        # STEP 2: Add spell cards from LLM's plan
+        spell_slots = target_size - land_count
+        cards_added = 0
+        
+        for i, selection in enumerate(plan.card_selections):
+            if cards_added >= spell_slots:
+                print(f"Reached spell slot limit ({spell_slots}), stopping card additions")
+                break
+                
+            # Handle both 'card_name' and 'name' keys (LLM sometimes uses 'name')
+            card_name = selection.get("card_name") or selection.get("name")
+            quantity = selection.get("quantity", 1)
+            
+            if not card_name:
+                print(f"Warning: Selection {i} missing card_name/name: {selection}")
+                continue
+            
+            # Don't exceed remaining slots
+            quantity = min(quantity, spell_slots - cards_added)
+            
+            # Get card from repository
+            card = self.card_repo.get_by_name(card_name)
+            if card:
+                # Skip lands (we already added them)
+                if "Land" not in card.types:
+                    print(f"Adding {quantity}x {card_name}")
+                    deck.cards.append(DeckCard(card=card, quantity=quantity))
+                    cards_added += quantity
+            else:
+                print(f"Warning: Card '{card_name}' not found in repository")
+        
+        # STEP 3: Fill remaining slots if needed
+        if cards_added < spell_slots:
+            remaining = spell_slots - cards_added
+            print(f"Warning: Only {cards_added}/{spell_slots} spell slots filled by LLM")
+            print(f"Filling {remaining} remaining slots with basic creatures/spells")
+            
+            # Try to find some basic cards to fill slots
+            # This is a fallback - ideally the LLM should provide enough cards
+            if request.colors:
+                # Search for basic creatures in the deck's colors
+                filters = CardSearchFilters(
+                    colors=request.colors,
+                    types=["Creature"],
+                    cmc_max=3.0,
+                    limit=50  # Get more candidates
+                )
+                filler_cards = self.card_repo.search(filters)
+                
+                # Add cards until we fill all remaining slots
+                card_index = 0
+                while remaining > 0 and card_index < len(filler_cards):
+                    filler_card = filler_cards[card_index]
+                    # Add 2-4 copies depending on how many slots we need
+                    qty = min(4, remaining)
+                    deck.cards.append(DeckCard(card=filler_card, quantity=qty))
+                    remaining -= qty
+                    print(f"Filler: Adding {qty}x {filler_card.name}")
+                    card_index += 1
+                
+                # If still not enough, add more lands
+                if remaining > 0:
+                    print(f"Warning: Still {remaining} slots unfilled. Adding more lands.")
+                    # Add to the first land type
+                    if deck.cards and "Land" in deck.cards[0].card.types:
+                        deck.cards[0].quantity += remaining
+        
         deck.calculate_totals()
-        print(f"Deck built: {deck.total_cards} cards")
+        print(f"Deck built: {deck.total_cards} cards (target: {target_size})")
+        
+        # Final validation
+        if deck.total_cards != target_size:
+            print(f"ERROR: Deck size mismatch! Got {deck.total_cards}, expected {target_size}")
+        
         return deck
+    
+    def _get_target_deck_size(self, format: str, requested_size: int) -> int:
+        """Get target deck size based on format."""
+        if requested_size > 0:
+            return requested_size
+        
+        # Format-specific defaults
+        format_lower = format.lower()
+        if "commander" in format_lower or "edh" in format_lower:
+            return 100
+        elif "brawl" in format_lower:
+            return 60  # Brawl is 60 cards
+        else:
+            # Standard, Modern, Pioneer, Legacy, Vintage, etc.
+            return 60
+    
+    def _get_land_count(self, archetype: str, deck_size: int) -> int:
+        """Get recommended land count based on archetype and deck size."""
+        archetype_lower = archetype.lower()
+        
+        # For 60-card formats
+        if deck_size == 60:
+            if "aggro" in archetype_lower:
+                return 22
+            elif "control" in archetype_lower:
+                return 26
+            elif "combo" in archetype_lower:
+                return 23
+            else:  # Midrange or unknown
+                return 24
+        
+        # For Commander (100 cards)
+        elif deck_size == 100:
+            return 37
+        
+        # Default: ~40% lands
+        return int(deck_size * 0.4)
     
     async def _execute_refinement_plan(
         self,
@@ -392,6 +502,75 @@ Suggestions:
                 deck = self._add_card(deck, action.card_name, action.quantity)
         
         deck.calculate_totals()
+        
+        # POST-REFINEMENT SIZE CORRECTION
+        target_size = 60  # Hardcoded for now, will make format-aware later
+        
+        if deck.total_cards < target_size:
+            shortage = target_size - deck.total_cards
+            print(f"Warning: Deck is {shortage} cards short. Adding filler creatures...")
+            
+            # Search for basic creatures in the deck's colors
+            if request.colors:
+                filters = CardSearchFilters(
+                    colors=request.colors,
+                    types=["Creature"],
+                    cmc_max=3.0,
+                    limit=20
+                )
+                filler_cards = self.card_repo.search(filters)
+                
+                # Add cards until we reach target size
+                card_index = 0
+                while shortage > 0 and card_index < len(filler_cards):
+                    filler_card = filler_cards[card_index]
+                    # Check if card is already in deck
+                    existing = next((dc for dc in deck.cards if dc.card.name == filler_card.name), None)
+                    if existing:
+                        # Increase quantity of existing card
+                        qty = min(4 - existing.quantity, shortage)
+                        if qty > 0:
+                            existing.quantity += qty
+                            shortage -= qty
+                            print(f"Filler: Increasing {filler_card.name} by {qty}")
+                    else:
+                        # Add new card
+                        qty = min(4, shortage)
+                        deck.cards.append(DeckCard(card=filler_card, quantity=qty))
+                        shortage -= qty
+                        print(f"Filler: Adding {qty}x {filler_card.name}")
+                    card_index += 1
+                
+                # If still short, add more lands
+                if shortage > 0:
+                    print(f"Still {shortage} cards short. Adding lands...")
+                    for dc in deck.cards:
+                        if "Land" in dc.card.types:
+                            dc.quantity += shortage
+                            break
+        
+        elif deck.total_cards > target_size:
+            excess = deck.total_cards - target_size
+            print(f"Warning: Deck has {excess} excess cards. Trimming...")
+            
+            # Remove excess cards (prioritize 1-ofs and 2-ofs)
+            deck.cards.sort(key=lambda dc: dc.quantity)  # Sort by quantity ascending
+            
+            for dc in deck.cards:
+                if excess <= 0:
+                    break
+                if "Land" not in dc.card.types:  # Don't trim lands
+                    to_remove = min(dc.quantity, excess)
+                    dc.quantity -= to_remove
+                    excess -= to_remove
+                    print(f"Trimming: Removing {to_remove}x {dc.card.name}")
+            
+            # Remove cards with 0 quantity
+            deck.cards = [dc for dc in deck.cards if dc.quantity > 0]
+        
+        deck.calculate_totals()
+        print(f"Final deck size after correction: {deck.total_cards}")
+        
         return deck
     
     def _remove_card(self, deck: Deck, card_name: str, quantity: int) -> Deck:
@@ -402,12 +581,17 @@ Suggestions:
         for deck_card in deck.cards:
             if deck_card.card.name.lower() == card_name.lower():
                 if removed_count < quantity:
-                    remaining = deck_card.quantity - (quantity - removed_count)
+                    # Calculate how many we can remove from this stack
+                    to_remove = min(deck_card.quantity, quantity - removed_count)
+                    remaining = deck_card.quantity - to_remove
+                    
                     if remaining > 0:
                         deck_card.quantity = remaining
                         new_cards.append(deck_card)
-                    removed_count += (deck_card.quantity - max(0, remaining))
+                    
+                    removed_count += to_remove
                 else:
+                    # Already removed enough, keep this stack
                     new_cards.append(deck_card)
             else:
                 new_cards.append(deck_card)
@@ -440,7 +624,9 @@ Suggestions:
         
         # Add basic lands (simplified)
         if request.colors:
-            land_count = 24
+            # Default to 60 if not specified
+            target_size = request.deck_size if request.deck_size > 0 else 60
+            
             for color in request.colors:
                 land_name = self._get_basic_land_name(color)
                 deck.cards.append(DeckCard(
@@ -451,7 +637,7 @@ Suggestions:
                         types=["Land"],
                         cmc=0.0
                     ),
-                    quantity=land_count // len(request.colors)
+                    quantity=target_size // len(request.colors)
                 ))
         
         deck.calculate_totals()

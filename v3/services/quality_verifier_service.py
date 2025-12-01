@@ -48,6 +48,13 @@ class QualityVerifierService:
             improvement_plan=None
         )
         
+        # Check deck size
+        target_size = 60 # Standard
+        if deck.total_cards != target_size:
+            metrics.issues.append(f"Deck size is {deck.total_cards}, expected {target_size}")
+            # Heavy penalty for wrong deck size
+            metrics.overall_score = 0.0
+        
         metrics.calculate_overall()
         
         # Generate issues and suggestions (heuristics)
