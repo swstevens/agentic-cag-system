@@ -7,6 +7,7 @@ provides improvement suggestions for iteration.
 
 from typing import List, Dict, Optional
 from ..models.deck import Deck, DeckQualityMetrics, DeckCard
+from ..models.format_rules import FormatRules
 from .llm_service import LLMService
 
 
@@ -27,29 +28,30 @@ class QualityVerifierService:
         """
         self.llm_service = llm_service
     
-    async def verify_deck(self, deck: Deck) -> DeckQualityMetrics:
+    async def verify_deck(self, deck: Deck, format_name: str = "Standard") -> DeckQualityMetrics:
         """
         Verify deck quality across all dimensions.
-        
+
         Args:
             deck: Deck to verify
-            
+            format_name: Format of the deck (e.g., "Standard", "Commander")
+
         Returns:
             Quality metrics with scores and suggestions
         """
         metrics = DeckQualityMetrics(
             mana_curve_score=self._analyze_mana_curve(deck),
-            land_ratio_score=self._analyze_land_ratio(deck),
+            land_ratio_score=self._analyze_land_ratio(deck, format_name),
             synergy_score=self._analyze_synergies(deck),
-            consistency_score=self._analyze_consistency(deck),
+            consistency_score=self._analyze_consistency(deck, format_name),
             overall_score=0.0,
             issues=[],
             suggestions=[],
             improvement_plan=None
         )
-        
+
         # Check deck size
-        target_size = 60 # Standard
+        target_size = FormatRules.get_deck_size(format_name)
         if deck.total_cards != target_size:
             metrics.issues.append(f"Deck size is {deck.total_cards}, expected {target_size}")
             # Heavy penalty for wrong deck size
@@ -144,34 +146,32 @@ class QualityVerifierService:
         
         return score
     
-    def _analyze_land_ratio(self, deck: Deck) -> float:
+    def _analyze_land_ratio(self, deck: Deck, format_name: str = "Standard") -> float:
         """
         Analyze land ratio quality.
-        
-        Ideal ratio is ~40% for 60-card decks, ~37% for Commander.
-        
+
+        Uses format-specific ideal ratios from FormatRules.
+
         Args:
             deck: Deck to analyze
-            
+            format_name: Format of the deck for appropriate ratio standards
+
         Returns:
             Score from 0.0 to 1.0
         """
         if deck.total_cards == 0:
             return 0.0
-        
+
         lands = deck.get_lands()
         land_count = sum(dc.quantity for dc in lands)
         land_ratio = land_count / deck.total_cards
-        
-        # Determine ideal ratio based on deck size
-        if deck.total_cards >= 99:  # Commander
-            ideal_ratio = 0.37
-        else:  # Standard 60-card
-            ideal_ratio = 0.40
-        
+
+        # Get ideal ratio from format rules
+        ideal_ratio = FormatRules.get_land_ratio(format_name)
+
         # Calculate deviation from ideal
         deviation = abs(land_ratio - ideal_ratio)
-        
+
         # Score based on deviation (within 5% is perfect, >10% is poor)
         if deviation <= 0.05:
             score = 1.0
@@ -179,7 +179,7 @@ class QualityVerifierService:
             score = 0.7
         else:
             score = max(0.0, 0.5 - deviation)
-        
+
         return score
     
     def _analyze_synergies(self, deck: Deck) -> float:
@@ -221,38 +221,49 @@ class QualityVerifierService:
         
         return min(1.0, synergy_score)
     
-    def _analyze_consistency(self, deck: Deck) -> float:
+    def _analyze_consistency(self, deck: Deck, format_name: str = "Standard") -> float:
         """
         Analyze deck consistency.
-        
-        Measures how many 4-ofs and 3-ofs exist (more copies = more consistent).
-        
+
+        For non-singleton formats: Measures how many cards are at copy limits (4-ofs, 3-ofs).
+        For singleton formats (Commander): Expects all non-lands to be 1-ofs.
+
         Args:
             deck: Deck to analyze
-            
+            format_name: Format of the deck for appropriate consistency standards
+
         Returns:
             Score from 0.0 to 1.0
         """
         nonlands = deck.get_nonlands()
         if not nonlands:
             return 0.0
-        
-        # Count cards by quantity
-        four_ofs = sum(1 for dc in nonlands if dc.quantity == 4)
-        three_ofs = sum(1 for dc in nonlands if dc.quantity == 3)
-        two_ofs = sum(1 for dc in nonlands if dc.quantity == 2)
-        one_ofs = sum(1 for dc in nonlands if dc.quantity == 1)
-        
-        total_unique = len(nonlands)
-        
-        # Higher consistency = more 4-ofs and 3-ofs
-        consistency_score = (
-            (four_ofs * 1.0) +
-            (three_ofs * 0.75) +
-            (two_ofs * 0.5) +
-            (one_ofs * 0.25)
-        ) / total_unique if total_unique > 0 else 0.0
-        
+
+        is_singleton = FormatRules.is_singleton(format_name)
+
+        if is_singleton:
+            # Commander: check if all non-lands are 1-ofs
+            one_ofs = sum(1 for dc in nonlands if dc.quantity == 1)
+            total_unique = len(nonlands)
+            # Perfect consistency is all 1-ofs
+            consistency_score = one_ofs / total_unique if total_unique > 0 else 0.0
+        else:
+            # Standard/Modern/etc: count cards by quantity
+            four_ofs = sum(1 for dc in nonlands if dc.quantity == 4)
+            three_ofs = sum(1 for dc in nonlands if dc.quantity == 3)
+            two_ofs = sum(1 for dc in nonlands if dc.quantity == 2)
+            one_ofs = sum(1 for dc in nonlands if dc.quantity == 1)
+
+            total_unique = len(nonlands)
+
+            # Higher consistency = more 4-ofs and 3-ofs
+            consistency_score = (
+                (four_ofs * 1.0) +
+                (three_ofs * 0.75) +
+                (two_ofs * 0.5) +
+                (one_ofs * 0.25)
+            ) / total_unique if total_unique > 0 else 0.0
+
         return min(1.0, consistency_score)
     
     def _identify_issues(self, deck: Deck, metrics: DeckQualityMetrics) -> List[str]:

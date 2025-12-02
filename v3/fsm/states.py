@@ -192,8 +192,10 @@ class VerifyQualityNode(BaseNode):
             if not quality_verifier:
                 raise ValueError("QualityVerifierService not found in dependencies")
 
-            # Verify deck quality
-            quality_metrics = await quality_verifier.verify_deck(deck)
+            # Verify deck quality with format from request
+            request = ctx.state.request
+            format_name = request.format if request else "Standard"
+            quality_metrics = await quality_verifier.verify_deck(deck, format_name)
             ctx.state.latest_quality = quality_metrics
 
             # Record this iteration

@@ -16,6 +16,7 @@ from ..models.deck import (
     CardSearchFilters,
     DeckImprovementPlan,
 )
+from ..models.format_rules import FormatRules
 from ..database.card_repository import CardRepository
 
 
@@ -26,11 +27,18 @@ class CardSearchResult(BaseModel):
     count: int = Field(description="Number of cards found")
 
 
+class CardSelection(BaseModel):
+    """Single card selection for deck construction."""
+    card_name: str = Field(description="Name of the card")
+    quantity: int = Field(description="Number of copies (1-4)", ge=1, le=4)
+    reasoning: str = Field(description="Why this card fits the deck strategy")
+
+
 class DeckConstructionPlan(BaseModel):
     """LLM's plan for constructing a deck."""
     strategy: str = Field(description="Overall strategy for deck construction")
-    card_selections: List[Dict[str, Any]] = Field(
-        description="List of SPELL card selections with card_name, quantity, and reasoning. Do NOT include lands."
+    card_selections: List[CardSelection] = Field(
+        description="List of SPELL card selections. Do NOT include lands. Focus on 3-4 copies of key cards for consistency."
     )
 
 
@@ -112,6 +120,12 @@ Analyze the current deck and improvement suggestions, then decide:
 2. Which cards to add (and why they're better)
 3. How to improve mana curve, synergy, or consistency
 
+IMPORTANT RULES:
+- LEGENDARY RULE: Legendary cards (marked with is_legendary: true) can only have 1 copy on the battlefield at a time
+  - Typically include 2-3 copies in the deck for consistency/redundancy
+  - Never recommend more than 3 copies of any legendary card
+- Non-legendary cards: Use 3-4 copies for consistency, avoid excessive 1-ofs unless situational
+
 Be specific and strategic. Focus on high-impact changes.
 """
         )
@@ -170,6 +184,7 @@ Be specific and strategic. Focus on high-impact changes.
                     "cmc": c.cmc,
                     "type_line": c.type_line,
                     "colors": c.colors,
+                    "is_legendary": "Legendary" in c.type_line,
                     "oracle_text": c.oracle_text[:100] if c.oracle_text else ""
                 }
                 for c in cards[:limit]
@@ -212,11 +227,12 @@ Be specific and strategic. Focus on high-impact changes.
                     "cmc": c.cmc,
                     "type_line": c.type_line,
                     "colors": c.colors,
+                    "is_legendary": "Legendary" in c.type_line,
                     "oracle_text": c.oracle_text[:100] if c.oracle_text else ""
                 }
                 for c in cards[:limit]
             ]
-            
+
             return CardSearchResult(cards=card_dicts, count=len(card_dicts))
     
     async def build_initial_deck(self, request: DeckBuildRequest) -> Deck:
@@ -234,14 +250,18 @@ Be specific and strategic. Focus on high-impact changes.
 Colors: {', '.join(request.colors)}
 Strategy: {request.strategy}
 
-IMPORTANT: You only need to select SPELL cards (creatures, instants, sorceries, etc.).
-Lands will be added automatically based on the archetype.
+IMPORTANT: 
+- You only need to select SPELL cards (creatures, instants, sorceries, etc.)
+- Lands will be added automatically (22 for aggro, 24 for midrange, 26 for control)
+- Focus on CONSISTENCY: Use 3-4 copies of your best cards
+- LEGENDARY RULE: Legendary cards (marked with is_legendary: true) should use 2-3 copies max
+- Avoid 1-ofs unless the card is legendary or highly situational
 
 Use the search_cards tool to find appropriate cards. 
 - Use semantic_query for high-level concepts (e.g. "synergistic goblin cards", "cheap removal")
 - Use standard filters for specific constraints
 
-Focus on building a synergistic spell suite. Provide a construction plan with your reasoning.
+Build a focused, consistent spell suite with clear synergies.
 """
         
         try:
@@ -304,20 +324,15 @@ Suggestions:
                 prompt += f"- Remove {removal.quantity}x {removal.card_name}: {removal.reason}\n"
             for addition in improvement_plan.additions:
                 prompt += f"- Add {addition.quantity}x {addition.card_name}: {addition.reason}\n"
-        
-        if improvement_plan:
-            prompt += f"\nImprovement plan from quality analysis:\n"
-            prompt += f"Analysis: {improvement_plan.analysis}\n"
-            for removal in improvement_plan.removals:
-                prompt += f"- Remove {removal.quantity}x {removal.card_name}: {removal.reason}\n"
-            for addition in improvement_plan.additions:
-                prompt += f"- Add {addition.quantity}x {addition.card_name}: {addition.reason}\n"
-        
+
         target_size = request.deck_size if request.deck_size > 0 else 60
-        prompt += f"\nIMPORTANT: Current deck size is {deck.total_cards}. Target size is {target_size}."
-        prompt += "\nIf current < target, you MUST add more cards than you remove."
-        prompt += "\nIf current > target, you MUST remove more cards than you add."
-        prompt += "\nIf current == target, you MUST add and remove equal amounts."
+        prompt += f"\nIMPORTANT CONSTRAINTS:"
+        prompt += f"\n- Current deck size is {deck.total_cards}. Target size is {target_size}."
+        prompt += "\n- If current < target, you MUST add more cards than you remove."
+        prompt += "\n- If current > target, you MUST remove more cards than you add."
+        prompt += "\n- If current == target, you MUST add and remove equal amounts."
+        prompt += "\n- For legendary cards (marked with is_legendary: true in search results): max 2-3 copies"
+        prompt += "\n- For non-legendary cards: prefer 3-4 copies for consistency"
         prompt += "\nUse search_cards_refine to find better cards (use semantic_query for best results). Provide a refinement plan."
         
         try:
@@ -392,12 +407,12 @@ Suggestions:
                 print(f"Reached spell slot limit ({spell_slots}), stopping card additions")
                 break
                 
-            # Handle both 'card_name' and 'name' keys (LLM sometimes uses 'name')
-            card_name = selection.get("card_name") or selection.get("name")
-            quantity = selection.get("quantity", 1)
+            # CardSelection is now a proper model with attributes
+            card_name = selection.card_name
+            quantity = selection.quantity
             
             if not card_name:
-                print(f"Warning: Selection {i} missing card_name/name: {selection}")
+                print(f"Warning: Selection {i} missing card_name: {selection}")
                 continue
             
             # Don't exceed remaining slots
@@ -423,6 +438,9 @@ Suggestions:
             # Try to find some basic cards to fill slots
             # This is a fallback - ideally the LLM should provide enough cards
             if request.colors:
+                # Get format-specific copy limit
+                copy_limit = FormatRules.get_copy_limit(request.format)
+
                 # Search for basic creatures in the deck's colors
                 filters = CardSearchFilters(
                     colors=request.colors,
@@ -432,13 +450,13 @@ Suggestions:
                     limit=50  # Get more candidates
                 )
                 filler_cards = self.card_repo.search(filters)
-                
+
                 # Add cards until we fill all remaining slots
                 card_index = 0
                 while remaining > 0 and card_index < len(filler_cards):
                     filler_card = filler_cards[card_index]
-                    # Add 2-4 copies depending on how many slots we need
-                    qty = min(4, remaining)
+                    # Add copies based on format copy limit
+                    qty = min(copy_limit, remaining)
                     deck.cards.append(DeckCard(card=filler_card, quantity=qty))
                     remaining -= qty
                     print(f"Filler: Adding {qty}x {filler_card.name}")
@@ -451,13 +469,16 @@ Suggestions:
                     if deck.cards and "Land" in deck.cards[0].card.types:
                         deck.cards[0].quantity += remaining
         
+        # Validate card quantities based on format rules
+        deck = self._validate_legendary_quantities(deck, request.format)
+
         deck.calculate_totals()
         print(f"Deck built: {deck.total_cards} cards (target: {target_size})")
-        
+
         # Final validation
         if deck.total_cards != target_size:
             print(f"ERROR: Deck size mismatch! Got {deck.total_cards}, expected {target_size}")
-        
+
         return deck
     
     def _get_target_deck_size(self, format: str, requested_size: int) -> int:
@@ -516,14 +537,17 @@ Suggestions:
                 deck = self._add_card(deck, action.card_name, action.quantity)
         
         deck.calculate_totals()
-        
+
         # POST-REFINEMENT SIZE CORRECTION
-        target_size = 60  # Hardcoded for now, will make format-aware later
-        
+        target_size = FormatRules.get_deck_size(request.format)
+
         if deck.total_cards < target_size:
             shortage = target_size - deck.total_cards
             print(f"Warning: Deck is {shortage} cards short. Adding filler creatures...")
-            
+
+            # Get format-specific copy limit
+            copy_limit = FormatRules.get_copy_limit(request.format)
+
             # Search for basic creatures in the deck's colors
             if request.colors:
                 filters = CardSearchFilters(
@@ -534,7 +558,7 @@ Suggestions:
                     limit=20
                 )
                 filler_cards = self.card_repo.search(filters)
-                
+
                 # Add cards until we reach target size
                 card_index = 0
                 while shortage > 0 and card_index < len(filler_cards):
@@ -542,15 +566,15 @@ Suggestions:
                     # Check if card is already in deck
                     existing = next((dc for dc in deck.cards if dc.card.name == filler_card.name), None)
                     if existing:
-                        # Increase quantity of existing card
-                        qty = min(4 - existing.quantity, shortage)
+                        # Increase quantity of existing card (respecting copy limit)
+                        qty = min(copy_limit - existing.quantity, shortage)
                         if qty > 0:
                             existing.quantity += qty
                             shortage -= qty
                             print(f"Filler: Increasing {filler_card.name} by {qty}")
                     else:
-                        # Add new card
-                        qty = min(4, shortage)
+                        # Add new card (respecting copy limit)
+                        qty = min(copy_limit, shortage)
                         deck.cards.append(DeckCard(card=filler_card, quantity=qty))
                         shortage -= qty
                         print(f"Filler: Adding {qty}x {filler_card.name}")
@@ -583,9 +607,12 @@ Suggestions:
             # Remove cards with 0 quantity
             deck.cards = [dc for dc in deck.cards if dc.quantity > 0]
         
+        # Validate card quantities based on format rules before returning
+        deck = self._validate_legendary_quantities(deck, request.format)
+
         deck.calculate_totals()
         print(f"Final deck size after correction: {deck.total_cards}")
-        
+
         return deck
     
     def _remove_card(self, deck: Deck, card_name: str, quantity: int) -> Deck:
@@ -668,3 +695,51 @@ Suggestions:
             "G": "Forest",
         }
         return mapping.get(color, "Wastes")
+
+    def _validate_legendary_quantities(self, deck: Deck, format_name: Optional[str] = None) -> Deck:
+        """
+        Validate and enforce card quantity constraints based on format rules.
+
+        For non-singleton formats (Standard, Modern, etc.):
+        - Legendary cards: max 2-3 copies (1 on battlefield, 2-3 for redundancy)
+        - Non-legendary cards: max 4 copies (standard limit)
+
+        For singleton formats (Commander):
+        - All non-land cards: exactly 1 copy (singleton rule)
+        - Basic lands: can have any number
+
+        Args:
+            deck: Deck to validate
+            format_name: Format name (defaults to "Standard" if not provided)
+
+        Returns:
+            Deck with corrected quantities
+        """
+        if not format_name:
+            format_name = "Standard"
+
+        is_singleton = FormatRules.is_singleton(format_name)
+
+        for deck_card in deck.cards:
+            card = deck_card.card
+            is_legendary = "Legendary" in card.type_line
+            is_basic_land = "Land" in card.types and card.type_line.startswith("Basic")
+
+            if is_singleton:
+                # Commander/singleton rule: 1 copy max for non-lands
+                if not is_basic_land and deck_card.quantity > 1:
+                    print(f"Commander singleton: '{card.name}' had {deck_card.quantity} copies, capping at 1")
+                    deck_card.quantity = 1
+            else:
+                # Standard copy limits
+                copy_limit = FormatRules.get_copy_limit(format_name)
+                legendary_max = FormatRules.get_legendary_max(format_name)
+
+                if is_legendary and deck_card.quantity > legendary_max:
+                    print(f"Legendary card '{card.name}' had {deck_card.quantity} copies, capping at {legendary_max}")
+                    deck_card.quantity = legendary_max
+                elif not is_legendary and deck_card.quantity > copy_limit:
+                    print(f"Non-legendary card '{card.name}' had {deck_card.quantity} copies, capping at {copy_limit}")
+                    deck_card.quantity = copy_limit
+
+        return deck
