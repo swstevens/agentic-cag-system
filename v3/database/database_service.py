@@ -253,17 +253,17 @@ class DatabaseService:
                 params.append(f"%{text_query}%")
         
             # Note: Color and type filtering requires JSON parsing
-            # For now, we'll do post-filtering in Python
+            # We do post-filtering in Python for these fields
             
             query += f" LIMIT ?"
-            params.append(limit * 10)  # Fetch more for post-filtering (increased from 2 to 10)
+            params.append(limit * 2)  # Fetch 2x for post-filtering (colors/types)
             
             cursor.execute(query, params)
             rows = cursor.fetchall()
             
             results = [self._row_to_dict(row) for row in rows]
             
-            # Post-filter for colors and types
+            # Post-filter for colors and types (SQL can't efficiently query JSON arrays)
             if colors:
                 results = [
                     card for card in results
@@ -276,11 +276,7 @@ class DatabaseService:
                     if any(card_type in card.get('types', []) for card_type in types)
                 ]
             
-            if format_legal:
-                results = [
-                    card for card in results
-                    if card.get('legalities', {}).get(format_legal.lower()) == 'Legal'
-                ]
+            # Format legality already filtered in SQL, no need to re-filter here
             
             return results[:limit]
     

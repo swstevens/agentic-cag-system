@@ -434,40 +434,7 @@ Suggestions:
             remaining = spell_slots - cards_added
             print(f"Warning: Only {cards_added}/{spell_slots} spell slots filled by LLM")
             print(f"Filling {remaining} remaining slots with basic creatures/spells")
-            
-            # Try to find some basic cards to fill slots
-            # This is a fallback - ideally the LLM should provide enough cards
-            if request.colors:
-                # Get format-specific copy limit
-                copy_limit = FormatRules.get_copy_limit(request.format)
-
-                # Search for basic creatures in the deck's colors
-                filters = CardSearchFilters(
-                    colors=request.colors,
-                    types=["Creature"],
-                    cmc_max=3.0,
-                    format_legal=request.format,
-                    limit=50  # Get more candidates
-                )
-                filler_cards = self.card_repo.search(filters)
-
-                # Add cards until we fill all remaining slots
-                card_index = 0
-                while remaining > 0 and card_index < len(filler_cards):
-                    filler_card = filler_cards[card_index]
-                    # Add copies based on format copy limit
-                    qty = min(copy_limit, remaining)
-                    deck.cards.append(DeckCard(card=filler_card, quantity=qty))
-                    remaining -= qty
-                    print(f"Filler: Adding {qty}x {filler_card.name}")
-                    card_index += 1
-                
-                # If still not enough, add more lands
-                if remaining > 0:
-                    print(f"Warning: Still {remaining} slots unfilled. Adding more lands.")
-                    # Add to the first land type
-                    if deck.cards and "Land" in deck.cards[0].card.types:
-                        deck.cards[0].quantity += remaining
+            self._add_filler_cards(deck, remaining, request)
         
         # Validate card quantities based on format rules
         deck = self._validate_legendary_quantities(deck, request.format)
@@ -544,49 +511,7 @@ Suggestions:
         if deck.total_cards < target_size:
             shortage = target_size - deck.total_cards
             print(f"Warning: Deck is {shortage} cards short. Adding filler creatures...")
-
-            # Get format-specific copy limit
-            copy_limit = FormatRules.get_copy_limit(request.format)
-
-            # Search for basic creatures in the deck's colors
-            if request.colors:
-                filters = CardSearchFilters(
-                    colors=request.colors,
-                    types=["Creature"],
-                    cmc_max=3.0,
-                    format_legal=request.format,
-                    limit=20
-                )
-                filler_cards = self.card_repo.search(filters)
-
-                # Add cards until we reach target size
-                card_index = 0
-                while shortage > 0 and card_index < len(filler_cards):
-                    filler_card = filler_cards[card_index]
-                    # Check if card is already in deck
-                    existing = next((dc for dc in deck.cards if dc.card.name == filler_card.name), None)
-                    if existing:
-                        # Increase quantity of existing card (respecting copy limit)
-                        qty = min(copy_limit - existing.quantity, shortage)
-                        if qty > 0:
-                            existing.quantity += qty
-                            shortage -= qty
-                            print(f"Filler: Increasing {filler_card.name} by {qty}")
-                    else:
-                        # Add new card (respecting copy limit)
-                        qty = min(copy_limit, shortage)
-                        deck.cards.append(DeckCard(card=filler_card, quantity=qty))
-                        shortage -= qty
-                        print(f"Filler: Adding {qty}x {filler_card.name}")
-                    card_index += 1
-                
-                # If still short, add more lands
-                if shortage > 0:
-                    print(f"Still {shortage} cards short. Adding lands...")
-                    for dc in deck.cards:
-                        if "Land" in dc.card.types:
-                            dc.quantity += shortage
-                            break
+            self._add_filler_cards(deck, shortage, request)
         
         elif deck.total_cards > target_size:
             excess = deck.total_cards - target_size
@@ -685,6 +610,71 @@ Suggestions:
         deck.calculate_totals()
         return deck
     
+    def _add_filler_cards(self, deck: Deck, needed: int, request: DeckBuildRequest) -> None:
+        """
+        Add filler cards to reach target deck size.
+        
+        Searches for low-cost creatures and adds them to the deck,
+        respecting format copy limits and checking for existing cards.
+        Falls back to adding lands if not enough creatures are available.
+        """
+        if not request.colors or needed <= 0:
+            return
+        
+        copy_limit = FormatRules.get_copy_limit(request.format)
+        
+        # Search for basic creatures in the deck's colors
+        filters = CardSearchFilters(
+            colors=request.colors,
+            types=["Creature"],
+            cmc_max=3.0,
+            format_legal=request.format,
+            limit=30
+        )
+        filler_cards = self.card_repo.search(filters)
+        
+        # Add cards until we reach target
+        for filler_card in filler_cards:
+            if needed <= 0:
+                break
+                
+            # Check if card already exists in deck
+            existing = next((dc for dc in deck.cards if dc.card.name == filler_card.name), None)
+            
+            if existing:
+                # Increase quantity (respecting copy limit)
+                qty = min(copy_limit - existing.quantity, needed)
+                if qty > 0:
+                    existing.quantity += qty
+                    needed -= qty
+                    print(f"Filler: Increasing {filler_card.name} by {qty}")
+            else:
+                # Add new card (respecting copy limit)
+                qty = min(copy_limit, needed)
+                deck.cards.append(DeckCard(card=filler_card, quantity=qty))
+                needed -= qty
+                print(f"Filler: Adding {qty}x {filler_card.name}")
+        
+        # Fallback: add lands if still needed
+        if needed > 0:
+            print(f"Still {needed} cards needed. Adding lands...")
+            land_card = next((dc for dc in deck.cards if "Land" in dc.card.types), None)
+            if land_card:
+                land_card.quantity += needed
+            else:
+                # No lands in deck yet - add basic land for first color
+                land_name = self._get_basic_land_name(request.colors[0])
+                deck.cards.append(DeckCard(
+                    card=MTGCard(
+                        id=land_name.lower(),
+                        name=land_name,
+                        type_line="Basic Land",
+                        types=["Land"],
+                        cmc=0.0
+                    ),
+                    quantity=needed
+                ))
+    
     def _get_basic_land_name(self, color: str) -> str:
         """Get basic land name for color."""
         mapping = {
@@ -731,14 +721,18 @@ Suggestions:
                     print(f"Commander singleton: '{card.name}' had {deck_card.quantity} copies, capping at 1")
                     deck_card.quantity = 1
             else:
-                # Standard copy limits
+                # Standard copy limits (basic lands are exempt)
+                if is_basic_land:
+                    # Basic lands can have unlimited copies
+                    continue
+                
                 copy_limit = FormatRules.get_copy_limit(format_name)
                 legendary_max = FormatRules.get_legendary_max(format_name)
 
                 if is_legendary and deck_card.quantity > legendary_max:
                     print(f"Legendary card '{card.name}' had {deck_card.quantity} copies, capping at {legendary_max}")
                     deck_card.quantity = legendary_max
-                elif not is_legendary and deck_card.quantity > copy_limit:
+                elif deck_card.quantity > copy_limit:
                     print(f"Non-legendary card '{card.name}' had {deck_card.quantity} copies, capping at {copy_limit}")
                     deck_card.quantity = copy_limit
 

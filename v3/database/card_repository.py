@@ -145,8 +145,8 @@ class CardRepository:
             return []
             
         # 1. Get candidate IDs from vector search
-        # Fetch more than limit to allow for post-filtering
-        candidate_ids = self.vector_service.search(query, limit=limit * 5)
+        # Fetch 2x limit to allow for post-filtering
+        candidate_ids = self.vector_service.search(query, limit=limit * 2)
         
         if not candidate_ids:
             return []

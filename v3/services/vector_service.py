@@ -64,18 +64,21 @@ class VectorService:
         metadatas = []
         
         for card in cards:
-            # Create a rich text representation for embedding
-            # Include name, type, text, and keywords for semantic meaning
-            text_content = f"""
-            Name: {card.name}
-            Type: {card.type_line}
-            Text: {card.oracle_text or ''}
-            Keywords: {', '.join(card.keywords or [])}
-            Colors: {', '.join(card.colors or [])}
-            """
+            # Create concise, semantically rich text for embedding
+            # Format: "Name. Type. CMC X. Oracle text."
+            parts = [
+                card.name,
+                card.type_line,
+                f"CMC {card.cmc}"
+            ]
+            
+            if card.oracle_text:
+                parts.append(card.oracle_text)
+            
+            text_content = ". ".join(parts)
             
             ids.append(card.id)
-            documents.append(text_content.strip())
+            documents.append(text_content)
             metadatas.append({
                 "name": card.name,
                 "cmc": card.cmc,
