@@ -31,10 +31,10 @@ flowchart TB
 
     subgraph SessionStore["Session Storage (Current)"]
         direction LR
-        SessionDeck[Current Deck<br/>session['deck']]
-        SessionMsgs[Chat Messages<br/>session['messages']]
-        SessionSaved[Saved Decks<br/>session['saved_decks']]
-        SessionCtx[Context<br/>session['context']]
+        SessionDeck[Current Deck<br/>session.deck]
+        SessionMsgs[Chat Messages<br/>session.messages]
+        SessionSaved[Saved Decks<br/>session.saved_decks]
+        SessionCtx[Context<br/>session.context]
     end
 
     subgraph Backend["FastAPI Backend (Port 8000)"]
