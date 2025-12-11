@@ -10,32 +10,27 @@ stateDiagram-v2
         EmptyDeck --> DeckLoaded: Chat Message → Backend API
         DeckLoaded --> DeckLoaded: Chat Message → Backend API
         DeckLoaded --> DeckSaved: Save Deck → Supabase
-
-        state EmptyDeck {
-            note right of EmptyDeck
-                - No deck in session
-                - Chat input active
-                - Empty deck list panel
-            end note
-        }
-
-        state DeckLoaded {
-            note right of DeckLoaded
-                - Current deck in session
-                - Cards displayed by type
-                - Save form visible
-                - Session auto-updates
-            end note
-        }
-
-        state DeckSaved {
-            note right of DeckSaved
-                - Deck persisted to Supabase
-                - Saved count updated
-                - Current deck remains loaded
-            end note
-        }
+        DeckSaved --> DeckLoaded: Continue Building
     }
+
+    note right of EmptyDeck
+        No deck in session
+        Chat input active
+        Empty deck list panel
+    end note
+
+    note right of DeckLoaded
+        Current deck in session
+        Cards displayed by type
+        Save form visible
+        Session auto-updates
+    end note
+
+    note right of DeckSaved
+        Deck persisted to Supabase
+        Saved count updated
+        Current deck remains loaded
+    end note
 
     MainBuilder --> SavedDecksPage: Click "View Saved"
     SavedDecksPage --> MainBuilder: Click "Back to Builder"
@@ -49,22 +44,18 @@ stateDiagram-v2
         UpdatingCategory --> ViewingDecks: Update → Supabase
         ViewingDecks --> DeletingDeck: Click "Delete"
         DeletingDeck --> ViewingDecks: Confirm → Supabase
-
-        state ViewingDecks {
-            note right of ViewingDecks
-                - List all saved decks
-                - Load from Supabase
-                - Display by category
-            end note
-        }
-
-        state EditingDeck {
-            note right of EditingDeck
-                - Inline edit form
-                - HTMX partial update
-            end note
-        }
     }
+
+    note right of ViewingDecks
+        List all saved decks
+        Load from Supabase
+        Display by category
+    end note
+
+    note right of EditingDeck
+        Inline edit form
+        HTMX partial update
+    end note
 
     state "Backend Services" as Backend {
         state "FastAPI Backend" as API {
@@ -76,43 +67,36 @@ stateDiagram-v2
         }
 
         state "Supabase Services" as Supabase {
-            state SavedDecksTable {
-                note right of SavedDecksTable
-                    Columns:
-                    - id (uuid)
-                    - user_id (uuid)
-                    - name (text)
-                    - deck_data (jsonb)
-                    - category (text)
-                    - created_at (timestamp)
-                    - updated_at (timestamp)
-                end note
-            }
-
-            state UserSessionsTable {
-                note right of UserSessionsTable
-                    Columns:
-                    - session_id (uuid)
-                    - user_id (uuid)
-                    - current_deck (jsonb)
-                    - context (jsonb)
-                    - messages (jsonb[])
-                end note
-            }
+            SavedDecksTable
+            UserSessionsTable
         }
     }
 
-    state "HTMX Interactions" as HTMX {
-        note right of HTMX
-            Partial Updates:
-            - hx-post="/chat" → #main-content
-            - hx-post="/save_deck" → #deck-list
-            - hx-post="/load_deck/{id}" → body
-            - hx-get="/edit_deck/{id}" → #saved-deck-{id}
-            - hx-delete="/delete_deck/{id}" → #saved-deck-{id}
-            - hx-post="/update_category/{id}" → #saved-deck-{id}
-        end note
-    }
+    note right of SavedDecksTable
+        Table: saved_decks
+        id, user_id, name
+        deck_data (jsonb)
+        category, timestamps
+    end note
+
+    note right of UserSessionsTable
+        Table: user_sessions
+        session_id, user_id
+        current_deck (jsonb)
+        context, messages
+    end note
+
+    state "HTMX Interactions" as HTMX
+
+    note right of HTMX
+        Partial Updates:
+        POST /chat → main-content
+        POST /save_deck → deck-list
+        POST /load_deck/id → body
+        GET /edit_deck/id → saved-deck
+        DELETE /delete_deck/id → saved-deck
+        POST /update_category/id → saved-deck
+    end note
 
     note left of Backend
         Service Layer:
