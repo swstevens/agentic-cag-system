@@ -11,6 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from components.deck_list import deck_list_component
 from components.chat import chat_component, chat_message
+from components.saved_decks import saved_decks_component, saved_deck_item
 
 
 # Initialize FastHTML app
@@ -31,9 +32,9 @@ BACKEND_URL = "http://localhost:8000"
 def render_content(session):
     """Render the main content area."""
     return Div(
-        deck_list_component(session.get("deck")),
+        deck_list_component(session.get("deck"), session.get("saved_decks", [])),
         chat_component(session.get("messages")),
-        cls="container",
+        cls="main-container",
         id="main-content"
     )
 
@@ -46,6 +47,8 @@ def get_session_state(session):
         session["messages"] = []
     if "context" not in session:
         session["context"] = {}
+    if "saved_decks" not in session:
+        session["saved_decks"] = []
     return session
 
 
@@ -131,6 +134,155 @@ async def post(message: str, session):
     
     # Return the updated main content
     return render_content(session)
+
+
+@rt("/save_deck")
+async def post(deck_name: str, session):
+    """Handle saving the current deck."""
+    get_session_state(session)
+
+    current_deck = session.get("deck")
+    if not current_deck:
+        # No deck to save
+        return deck_list_component(None, session.get("saved_decks", []))
+
+    # Create a saved deck entry
+    saved_deck = {
+        "name": deck_name,
+        "deck": current_deck.copy(),
+        "category": "Uncategorized",
+        "created_at": None  # Could add timestamp if needed
+    }
+
+    # Add to saved decks
+    if "saved_decks" not in session:
+        session["saved_decks"] = []
+    session["saved_decks"].append(saved_deck)
+
+    # Return updated deck list
+    return deck_list_component(current_deck, session["saved_decks"])
+
+
+@rt("/decks")
+def get(session):
+    """Render the saved decks page."""
+    get_session_state(session)
+    return Title("Saved Decks - MTG Deck Builder"), Main(
+        saved_decks_component(session.get("saved_decks", []))
+    )
+
+
+@rt("/load_deck/{index}")
+async def post(index: int, session):
+    """Load a saved deck into the current deck."""
+    get_session_state(session)
+
+    saved_decks = session.get("saved_decks", [])
+    if 0 <= index < len(saved_decks):
+        # Load the deck
+        session["deck"] = saved_decks[index]["deck"].copy()
+        # Update context
+        deck_data = session["deck"]
+        session["context"] = {
+            "format": deck_data.get("format"),
+            "colors": deck_data.get("colors", []),
+            "archetype": deck_data.get("archetype"),
+        }
+        # Add a message to chat
+        session["messages"].append({
+            "role": "assistant",
+            "content": f"Loaded deck: {saved_decks[index]['name']}"
+        })
+
+    # Return to main page
+    return Title("MTG Deck Builder"), Main(
+        render_content(session)
+    )
+
+
+@rt("/edit_deck/{index}")
+def get(index: int, session):
+    """Render edit form for a deck name."""
+    get_session_state(session)
+
+    saved_decks = session.get("saved_decks", [])
+    if 0 <= index < len(saved_decks):
+        deck_data = saved_decks[index]
+        return Div(
+            Form(
+                Input(
+                    type="text",
+                    name="new_name",
+                    value=deck_data["name"],
+                    required=True,
+                    cls="deck-name-edit-input"
+                ),
+                Button("Save", type="submit", cls="deck-action-button save-button"),
+                Button("Cancel",
+                       hx_get=f"/cancel_edit/{index}",
+                       hx_target=f"#saved-deck-{index}",
+                       hx_swap="outerHTML",
+                       cls="deck-action-button cancel-button"),
+                hx_post=f"/save_edit/{index}",
+                hx_target=f"#saved-deck-{index}",
+                hx_swap="outerHTML",
+                cls="edit-deck-form"
+            ),
+            id=f"saved-deck-{index}",
+            cls="saved-deck-item editing"
+        )
+    return Div()  # Return empty if index invalid
+
+
+@rt("/save_edit/{index}")
+async def post(index: int, new_name: str, session):
+    """Save edited deck name."""
+    get_session_state(session)
+
+    saved_decks = session.get("saved_decks", [])
+    if 0 <= index < len(saved_decks):
+        saved_decks[index]["name"] = new_name
+        session["saved_decks"] = saved_decks
+        return saved_deck_item(saved_decks[index], index)
+    return Div()
+
+
+@rt("/cancel_edit/{index}")
+def get(index: int, session):
+    """Cancel editing and return to normal view."""
+    get_session_state(session)
+
+    saved_decks = session.get("saved_decks", [])
+    if 0 <= index < len(saved_decks):
+        return saved_deck_item(saved_decks[index], index)
+    return Div()
+
+
+@rt("/update_category/{index}")
+async def post(index: int, category: str, session):
+    """Update deck category."""
+    get_session_state(session)
+
+    saved_decks = session.get("saved_decks", [])
+    if 0 <= index < len(saved_decks):
+        saved_decks[index]["category"] = category
+        session["saved_decks"] = saved_decks
+        return saved_deck_item(saved_decks[index], index)
+    return Div()
+
+
+@rt("/delete_deck/{index}")
+async def delete(index: int, session):
+    """Delete a saved deck."""
+    get_session_state(session)
+
+    saved_decks = session.get("saved_decks", [])
+    if 0 <= index < len(saved_decks):
+        del saved_decks[index]
+        session["saved_decks"] = saved_decks
+
+    # Return empty - the item will be removed from the DOM
+    return Div()
 
 
 @rt("/static/{filepath:path}")

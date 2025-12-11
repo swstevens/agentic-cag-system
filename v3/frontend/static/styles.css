@@ -47,8 +47,27 @@ body {
 
 .deck-header {
     font-size: 1.5rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
     color: var(--text-primary);
+}
+
+.deck-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.view-saved-link {
+    font-size: 0.875rem;
+    color: var(--primary-color);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.view-saved-link:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
 }
 
 .deck-header-section {
@@ -135,6 +154,59 @@ body {
     font-family: 'Courier New', monospace;
     color: var(--text-secondary);
     font-size: 0.75rem;
+}
+
+/* Save Deck Form */
+.save-deck-form {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.save-deck-form-group {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.deck-name-input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.deck-name-input:focus {
+    border-color: var(--success-color);
+}
+
+.save-deck-button {
+    padding: 0.5rem 1rem;
+    background-color: var(--success-color);
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    white-space: nowrap;
+}
+
+.save-deck-button:hover {
+    background-color: #059669;
+}
+
+.save-deck-button:active {
+    transform: translateY(1px);
+}
+
+.deck-cards {
+    overflow-y: auto;
 }
 
 /* Chat Styles */
@@ -270,4 +342,215 @@ body {
 .htmx-request .chat-submit {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+/* Saved Decks Page */
+.saved-decks-container {
+    background-color: var(--bg-color);
+    padding: 2rem;
+    min-height: 100vh;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.saved-decks-title-section {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.saved-decks-header {
+    font-size: 2rem;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.back-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-size: 1rem;
+    transition: color 0.2s;
+}
+
+.back-link:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
+}
+
+.saved-decks-empty {
+    text-align: center;
+    padding: 4rem 1rem;
+    color: var(--text-secondary);
+}
+
+.saved-decks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.saved-deck-item {
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    transition: border-color 0.2s;
+}
+
+.saved-deck-item:hover {
+    border-color: var(--primary-color);
+}
+
+.saved-deck-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1.5rem;
+}
+
+.saved-deck-header {
+    flex: 1;
+}
+
+.saved-deck-name {
+    font-size: 1.25rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+}
+
+.saved-deck-info {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.deck-category-badge {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+}
+
+.saved-deck-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+}
+
+.deck-action-button {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.load-button {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.load-button:hover {
+    background-color: var(--primary-hover);
+}
+
+.edit-button {
+    background-color: var(--warning-color);
+    color: white;
+}
+
+.edit-button:hover {
+    background-color: #d97706;
+}
+
+.delete-button {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.delete-button:hover {
+    background-color: #dc2626;
+}
+
+.save-button {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.save-button:hover {
+    background-color: #059669;
+}
+
+.cancel-button {
+    background-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.cancel-button:hover {
+    background-color: #475569;
+}
+
+.category-button {
+    background-color: var(--primary-color);
+    color: white;
+    font-size: 0.75rem;
+    padding: 0.375rem 0.75rem;
+}
+
+.category-button:hover {
+    background-color: var(--primary-hover);
+}
+
+.category-form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.category-select {
+    padding: 0.375rem 0.5rem;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    outline: none;
+}
+
+.category-select:focus {
+    border-color: var(--primary-color);
+}
+
+.edit-deck-form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.deck-name-edit-input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    color: var(--text-primary);
+    font-size: 1rem;
+    outline: none;
+}
+
+.deck-name-edit-input:focus {
+    border-color: var(--primary-color);
+}
+
+.saved-deck-item.editing {
+    background-color: var(--bg-color);
+    border-color: var(--warning-color);
 }

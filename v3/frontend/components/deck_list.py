@@ -3,9 +3,10 @@ Deck list component for displaying cards in the current deck.
 """
 
 from fasthtml.common import *
+from components.card import card_component
 
 
-def deck_list_component(deck: dict | None) -> FT:
+def deck_list_component(deck: dict | None, saved_decks: list = None) -> FT:
     """
     Render the deck list component.
     
@@ -60,8 +61,13 @@ def deck_list_component(deck: dict | None) -> FT:
     sorted_groups = [(t, grouped_cards[t]) for t in type_order if t in grouped_cards]
     
     # Build deck info header
+    saved_count = len(saved_decks) if saved_decks else 0
     deck_info = Div(
-        H2("Deck List", cls="deck-header"),
+        Div(
+            H2("Deck List", cls="deck-header"),
+            A(f"View Saved ({saved_count})", href="/decks", cls="view-saved-link"),
+            cls="deck-header-row"
+        ),
         Div(
             Span(f"{deck['total_cards']} cards", cls="deck-stat"),
             Span(f"{deck['format']}", cls="deck-stat"),
@@ -80,19 +86,14 @@ def deck_list_component(deck: dict | None) -> FT:
         for deck_card in sorted(cards, key=lambda x: x["card"]["name"]):
             card = deck_card["card"]
             quantity = deck_card["quantity"]
-            
+
             # Format mana cost
             mana_cost = card.get("mana_cost", "")
             if not mana_cost and card.get("cmc", 0) > 0:
                 mana_cost = f"{{{int(card['cmc'])}}}"
-            
+
             card_items.append(
-                Div(
-                    Span(f"{quantity}x", cls="card-quantity"),
-                    Span(card["name"], cls="card-name"),
-                    Span(mana_cost, cls="card-mana-cost"),
-                    cls="card-item"
-                )
+                card_component(card["name"], quantity, mana_cost)
             )
         
         card_groups.append(
@@ -103,8 +104,28 @@ def deck_list_component(deck: dict | None) -> FT:
             )
         )
     
+    # Save deck form
+    save_form = Form(
+        Div(
+            Input(
+                type="text",
+                name="deck_name",
+                placeholder="Enter deck name...",
+                required=True,
+                cls="deck-name-input"
+            ),
+            Button("Save Deck", type="submit", cls="save-deck-button"),
+            cls="save-deck-form-group"
+        ),
+        hx_post="/save_deck",
+        hx_target="#deck-list",
+        hx_swap="outerHTML",
+        cls="save-deck-form"
+    )
+
     return Div(
         deck_info,
+        save_form,
         Div(*card_groups, cls="deck-cards"),
         id="deck-list",
         cls="deck-list-container"
