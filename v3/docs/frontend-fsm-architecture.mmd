@@ -1,0 +1,139 @@
+---
+title: MTG Deck Builder Frontend - FSM Architecture
+---
+
+stateDiagram-v2
+    [*] --> MainBuilder: Initial Load
+
+    state MainBuilder {
+        [*] --> EmptyDeck
+        EmptyDeck --> DeckLoaded: Chat Message → Backend API
+        DeckLoaded --> DeckLoaded: Chat Message → Backend API
+        DeckLoaded --> DeckSaved: Save Deck → Supabase
+
+        state EmptyDeck {
+            note right of EmptyDeck
+                - No deck in session
+                - Chat input active
+                - Empty deck list panel
+            end note
+        }
+
+        state DeckLoaded {
+            note right of DeckLoaded
+                - Current deck in session
+                - Cards displayed by type
+                - Save form visible
+                - Session auto-updates
+            end note
+        }
+
+        state DeckSaved {
+            note right of DeckSaved
+                - Deck persisted to Supabase
+                - Saved count updated
+                - Current deck remains loaded
+            end note
+        }
+    }
+
+    MainBuilder --> SavedDecksPage: Click "View Saved"
+    SavedDecksPage --> MainBuilder: Click "Back to Builder"
+    SavedDecksPage --> MainBuilder: Load Deck → Supabase Read
+
+    state SavedDecksPage {
+        [*] --> ViewingDecks
+        ViewingDecks --> EditingDeck: Click "Edit Name"
+        EditingDeck --> ViewingDecks: Save/Cancel
+        ViewingDecks --> UpdatingCategory: Select Category
+        UpdatingCategory --> ViewingDecks: Update → Supabase
+        ViewingDecks --> DeletingDeck: Click "Delete"
+        DeletingDeck --> ViewingDecks: Confirm → Supabase
+
+        state ViewingDecks {
+            note right of ViewingDecks
+                - List all saved decks
+                - Load from Supabase
+                - Display by category
+            end note
+        }
+
+        state EditingDeck {
+            note right of EditingDeck
+                - Inline edit form
+                - HTMX partial update
+            end note
+        }
+    }
+
+    state "Backend Services" as Backend {
+        state "FastAPI Backend" as API {
+            [*] --> ChatEndpoint
+            ChatEndpoint --> DeckBuilderService: /api/chat
+            DeckBuilderService --> MultiAgentOrchestrator
+            MultiAgentOrchestrator --> VectorStore: Synergy Lookup
+            MultiAgentOrchestrator --> CardDatabase: Card Search
+        }
+
+        state "Supabase Services" as Supabase {
+            state SavedDecksTable {
+                note right of SavedDecksTable
+                    Columns:
+                    - id (uuid)
+                    - user_id (uuid)
+                    - name (text)
+                    - deck_data (jsonb)
+                    - category (text)
+                    - created_at (timestamp)
+                    - updated_at (timestamp)
+                end note
+            }
+
+            state UserSessionsTable {
+                note right of UserSessionsTable
+                    Columns:
+                    - session_id (uuid)
+                    - user_id (uuid)
+                    - current_deck (jsonb)
+                    - context (jsonb)
+                    - messages (jsonb[])
+                end note
+            }
+        }
+    }
+
+    state "HTMX Interactions" as HTMX {
+        note right of HTMX
+            Partial Updates:
+            - hx-post="/chat" → #main-content
+            - hx-post="/save_deck" → #deck-list
+            - hx-post="/load_deck/{id}" → body
+            - hx-get="/edit_deck/{id}" → #saved-deck-{id}
+            - hx-delete="/delete_deck/{id}" → #saved-deck-{id}
+            - hx-post="/update_category/{id}" → #saved-deck-{id}
+        end note
+    }
+
+    note left of Backend
+        Service Layer:
+        - FastAPI (localhost:8000)
+        - Multi-Agent Orchestrator
+        - Vector Store (ChromaDB)
+        - Card Database (SQLite)
+    end note
+
+    note right of Supabase
+        Future Implementation:
+        - Replace session storage
+        - User authentication
+        - Real-time deck sync
+        - Collaborative features
+    end note
+
+classDef currentImpl fill:#10b981,stroke:#059669,color:#fff
+classDef futureImpl fill:#f59e0b,stroke:#d97706,color:#fff
+classDef apiService fill:#2563eb,stroke:#1d4ed8,color:#fff
+
+class MainBuilder,SavedDecksPage,HTMX currentImpl
+class Supabase,UserSessionsTable,SavedDecksTable futureImpl
+class API,Backend apiService

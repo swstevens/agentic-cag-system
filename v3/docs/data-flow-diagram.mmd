@@ -1,0 +1,158 @@
+---
+title: MTG Deck Builder - Data Flow Architecture
+---
+
+flowchart TB
+    User([User Browser])
+
+    subgraph Frontend["FastHTML Frontend (Port 5000)"]
+        direction TB
+        MainPage[Main Builder Page<br/>Two-Column Layout]
+        SavedPage[Saved Decks Page]
+
+        subgraph Components["FastHTML Components"]
+            ChatComp[Chat Component<br/>chat.py]
+            DeckListComp[Deck List Component<br/>deck_list.py]
+            CardComp[Card Component<br/>card.py]
+            SavedComp[Saved Decks Component<br/>saved_decks.py]
+        end
+
+        subgraph Routes["Route Handlers"]
+            RootRoute[GET / - Main Page]
+            ChatRoute[POST /chat - Send Message]
+            SaveRoute[POST /save_deck - Save Deck]
+            DecksRoute[GET /decks - View Saved]
+            LoadRoute[POST /load_deck/id]
+            EditRoute[GET/POST /edit_deck/id]
+            DeleteRoute[DELETE /delete_deck/id]
+            CategoryRoute[POST /update_category/id]
+        end
+    end
+
+    subgraph SessionStore["Session Storage (Current)"]
+        direction LR
+        SessionDeck[Current Deck<br/>session['deck']]
+        SessionMsgs[Chat Messages<br/>session['messages']]
+        SessionSaved[Saved Decks<br/>session['saved_decks']]
+        SessionCtx[Context<br/>session['context']]
+    end
+
+    subgraph Backend["FastAPI Backend (Port 8000)"]
+        direction TB
+        APIRouter[API Router<br/>/api/v1/*]
+
+        subgraph Endpoints["API Endpoints"]
+            ChatEndpoint[POST /api/v1/chat]
+            QueryEndpoint[POST /api/v1/query]
+            CardsEndpoint[GET /api/v1/cards]
+            SynergyEndpoint[GET /api/v1/synergy/card]
+        end
+
+        subgraph Services["Backend Services"]
+            Orchestrator[Multi-Agent Orchestrator]
+            DeckBuilder[Deck Builder Service]
+            VectorSvc[Vector Store Service<br/>ChromaDB]
+            CardLookup[Card Lookup Service]
+            SynergyLookup[Synergy Lookup Service]
+        end
+    end
+
+    subgraph SupabaseFuture["Supabase (Future)"]
+        direction TB
+
+        subgraph Tables["Database Tables"]
+            UsersTable[(users<br/>- id<br/>- email<br/>- created_at)]
+            DecksTable[(saved_decks<br/>- id<br/>- user_id<br/>- name<br/>- deck_data<br/>- category<br/>- created_at)]
+            SessionsTable[(user_sessions<br/>- session_id<br/>- user_id<br/>- current_deck<br/>- context<br/>- messages)]
+        end
+
+        subgraph SupabaseAPI["Supabase APIs"]
+            Auth[Auth API<br/>Authentication]
+            Database[Database API<br/>CRUD Operations]
+            Realtime[Realtime API<br/>Live Updates]
+        end
+    end
+
+    subgraph Data["Data Stores"]
+        CardDB[(Card Database<br/>SQLite)]
+        VectorDB[(Vector Store<br/>ChromaDB)]
+        CacheL1[L1 Cache<br/>200 items]
+        CacheL2[L2 Cache<br/>1000 items]
+    end
+
+    %% User Interactions
+    User -->|1. Navigate| MainPage
+    User -->|2. Send Message| ChatRoute
+    User -->|3. Save Deck| SaveRoute
+    User -->|4. View Saved| DecksRoute
+    User -->|5. Load Deck| LoadRoute
+
+    %% Frontend Component Flow
+    MainPage --> DeckListComp
+    MainPage --> ChatComp
+    DeckListComp --> CardComp
+    SavedPage --> SavedComp
+
+    %% Route to Component
+    RootRoute --> MainPage
+    ChatRoute --> ChatComp
+    DecksRoute --> SavedPage
+
+    %% Session Interaction (Current)
+    ChatRoute <--> SessionDeck
+    ChatRoute <--> SessionMsgs
+    SaveRoute --> SessionSaved
+    LoadRoute <--> SessionSaved
+    LoadRoute --> SessionDeck
+    EditRoute <--> SessionSaved
+    DeleteRoute --> SessionSaved
+    CategoryRoute <--> SessionSaved
+
+    %% Frontend to Backend
+    ChatRoute -->|HTTP POST| ChatEndpoint
+    ChatEndpoint --> Orchestrator
+
+    %% Backend Service Flow
+    Orchestrator --> DeckBuilder
+    DeckBuilder --> VectorSvc
+    DeckBuilder --> CardLookup
+    DeckBuilder --> SynergyLookup
+
+    %% Backend Data Access
+    CardLookup --> CardDB
+    VectorSvc --> VectorDB
+    CardLookup --> CacheL1
+    CardLookup --> CacheL2
+
+    %% Response Flow
+    Orchestrator -->|Deck Data| ChatEndpoint
+    ChatEndpoint -->|JSON Response| ChatRoute
+    ChatRoute -->|Update Session| SessionDeck
+    ChatRoute -->|HTMX Swap| MainPage
+
+    %% Future Supabase Integration (Dashed)
+    SaveRoute -.->|Future: Create| DecksTable
+    LoadRoute -.->|Future: Read| DecksTable
+    EditRoute -.->|Future: Update| DecksTable
+    DeleteRoute -.->|Future: Delete| DecksTable
+    CategoryRoute -.->|Future: Update| DecksTable
+
+    SessionDeck -.->|Future: Sync| SessionsTable
+    SessionMsgs -.->|Future: Sync| SessionsTable
+    SessionCtx -.->|Future: Sync| SessionsTable
+
+    User -.->|Future: Login| Auth
+    Auth -.->|JWT Token| UsersTable
+
+    DecksTable -.->|Future: Realtime| SavedPage
+
+    %% Styling
+    classDef current fill:#10b981,stroke:#059669,color:#fff
+    classDef future fill:#f59e0b,stroke:#d97706,color:#000
+    classDef backend fill:#2563eb,stroke:#1d4ed8,color:#fff
+    classDef data fill:#8b5cf6,stroke:#7c3aed,color:#fff
+
+    class Frontend,Components,Routes,SessionStore current
+    class SupabaseFuture,Tables,SupabaseAPI,Auth future
+    class Backend,Endpoints,Services,Orchestrator backend
+    class Data,CardDB,VectorDB,CacheL1,CacheL2 data
