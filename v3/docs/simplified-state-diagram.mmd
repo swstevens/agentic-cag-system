@@ -42,8 +42,8 @@ stateDiagram-v2
 
     note right of Saving
         State: Persisting to storage
-        Future: Supabase INSERT
-        Current: Session append
+        Backend: SQLite saved_decks table
+        API: POST /api/decks
     end note
 
     note right of ViewingSaved

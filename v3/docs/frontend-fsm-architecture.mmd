@@ -8,8 +8,8 @@ stateDiagram-v2
     state MainBuilder {
         [*] --> EmptyDeck
         EmptyDeck --> DeckLoaded: Chat Message → Backend API
-        DeckLoaded --> DeckLoaded: Chat Message → Backend API
-        DeckLoaded --> DeckSaved: Save Deck → Supabase
+        DeckLoaded --> DeckLoaded: Chat Message → Backend API + Current Deck
+        DeckLoaded --> DeckSaved: Save Deck → SQLite (POST /api/decks)
         DeckSaved --> DeckLoaded: Continue Building
     }
 
@@ -27,28 +27,28 @@ stateDiagram-v2
     end note
 
     note right of DeckSaved
-        Deck persisted to Supabase
+        Deck persisted to SQLite
         Saved count updated
         Current deck remains loaded
     end note
 
     MainBuilder --> SavedDecksPage: Click "View Saved"
     SavedDecksPage --> MainBuilder: Click "Back to Builder"
-    SavedDecksPage --> MainBuilder: Load Deck → Supabase Read
+    SavedDecksPage --> MainBuilder: Load Deck → SQLite Read (GET /api/decks/id)
 
     state SavedDecksPage {
         [*] --> ViewingDecks
         ViewingDecks --> EditingDeck: Click "Edit Name"
-        EditingDeck --> ViewingDecks: Save/Cancel
+        EditingDeck --> ViewingDecks: Save/Cancel (PUT /api/decks/id)
         ViewingDecks --> UpdatingCategory: Select Category
-        UpdatingCategory --> ViewingDecks: Update → Supabase
+        UpdatingCategory --> ViewingDecks: Update → SQLite (PUT /api/decks/id)
         ViewingDecks --> DeletingDeck: Click "Delete"
-        DeletingDeck --> ViewingDecks: Confirm → Supabase
+        DeletingDeck --> ViewingDecks: Confirm → SQLite (DELETE /api/decks/id)
     }
 
     note right of ViewingDecks
         List all saved decks
-        Load from Supabase
+        Load from SQLite (GET /api/decks)
         Display by category
     end note
 
@@ -66,24 +66,23 @@ stateDiagram-v2
             MultiAgentOrchestrator --> CardDatabase: Card Search
         }
 
-        state "Supabase Services" as Supabase {
+        state "SQLite Database" as SQLiteDB {
+            CardsTable
             SavedDecksTable
-            UserSessionsTable
         }
     }
 
     note right of SavedDecksTable
         Table: saved_decks
-        id, user_id, name
-        deck_data (jsonb)
-        category, timestamps
+        id (auto), name, deck_data (JSON)
+        category, created_at, updated_at
+        Indexes: name, category
     end note
 
-    note right of UserSessionsTable
-        Table: user_sessions
-        session_id, user_id
-        current_deck (jsonb)
-        context, messages
+    note right of CardsTable
+        Table: cards
+        Card database with full MTG data
+        Used by deck building FSM
     end note
 
     state "HTMX Interactions" as HTMX
@@ -103,21 +102,21 @@ stateDiagram-v2
         - FastAPI (localhost:8000)
         - Multi-Agent Orchestrator
         - Vector Store (ChromaDB)
-        - Card Database (SQLite)
+        - SQLite Database (cards + saved_decks)
     end note
 
-    note right of Supabase
-        Future Implementation:
-        - Replace session storage
-        - User authentication
-        - Real-time deck sync
-        - Collaborative features
+    note right of SQLiteDB
+        Persistent Storage:
+        - All decks saved to database
+        - CRUD via REST API
+        - No session dependency
+        - Ready for user auth
     end note
 
 classDef currentImpl fill:#10b981,stroke:#059669,color:#fff
-classDef futureImpl fill:#f59e0b,stroke:#d97706,color:#fff
+classDef database fill:#8b5cf6,stroke:#7c3aed,color:#fff
 classDef apiService fill:#2563eb,stroke:#1d4ed8,color:#fff
 
 class MainBuilder,SavedDecksPage,HTMX currentImpl
-class Supabase,UserSessionsTable,SavedDecksTable futureImpl
+class SQLiteDB,CardsTable,SavedDecksTable database
 class API,Backend apiService

@@ -86,15 +86,22 @@ async def post(message: str, session):
         return render_content(session)
 
     try:
-        # Call backend API
+        # Call backend API with current deck for refinement support
         print(f"DEBUG: Sending request to {BACKEND_URL}/api/chat")
+        request_data = {
+            "message": message,
+            "context": session.get("context", {})
+        }
+
+        # Include current deck if it exists (for refinement)
+        if session.get("deck"):
+            request_data["current_deck"] = session["deck"]
+            print(f"DEBUG: Including current deck with {session['deck'].get('total_cards', 0)} cards")
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 f"{BACKEND_URL}/api/chat",
-                json={
-                    "message": message,
-                    "context": session.get("context", {})
-                }
+                json=request_data
             )
             response.raise_for_status()
             data = response.json()

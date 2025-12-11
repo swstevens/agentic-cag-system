@@ -29,11 +29,10 @@ flowchart TB
         end
     end
 
-    subgraph SessionStore["Session Storage (Current)"]
+    subgraph SessionStore["Session Storage (Frontend Only)"]
         direction LR
         SessionDeck[Current Deck<br/>session.deck]
         SessionMsgs[Chat Messages<br/>session.messages]
-        SessionSaved[Saved Decks<br/>session.saved_decks]
         SessionCtx[Context<br/>session.context]
     end
 
@@ -42,8 +41,9 @@ flowchart TB
         APIRouter[API Router<br/>/api/v1/*]
 
         subgraph Endpoints["API Endpoints"]
-            ChatEndpoint[POST /api/v1/chat]
-            QueryEndpoint[POST /api/v1/query]
+            ChatEndpoint[POST /api/chat]
+            DecksEndpoint[GET/POST /api/decks]
+            DeckEndpoint[GET/PUT/DELETE /api/decks/id]
             CardsEndpoint[GET /api/v1/cards]
             SynergyEndpoint[GET /api/v1/synergy/card]
         end
@@ -57,20 +57,15 @@ flowchart TB
         end
     end
 
-    subgraph SupabaseFuture["Supabase (Future)"]
+    subgraph SQLiteDB["SQLite Database"]
         direction TB
 
         subgraph Tables["Database Tables"]
-            UsersTable[(users<br/>- id<br/>- email<br/>- created_at)]
-            DecksTable[(saved_decks<br/>- id<br/>- user_id<br/>- name<br/>- deck_data<br/>- category<br/>- created_at)]
-            SessionsTable[(user_sessions<br/>- session_id<br/>- user_id<br/>- current_deck<br/>- context<br/>- messages)]
+            CardsDBTable[(cards<br/>- MTG card data<br/>- 20000+ cards)]
+            SavedDecksTable[(saved_decks<br/>- id (autoincrement)<br/>- name<br/>- deck_data (JSON)<br/>- category<br/>- timestamps)]
         end
 
-        subgraph SupabaseAPI["Supabase APIs"]
-            Auth[Auth API<br/>Authentication]
-            Database[Database API<br/>CRUD Operations]
-            Realtime[Realtime API<br/>Live Updates]
-        end
+        DatabaseSvc[Database Service<br/>CRUD Operations]
     end
 
     subgraph Data["Data Stores"]
@@ -98,18 +93,26 @@ flowchart TB
     ChatRoute --> ChatComp
     DecksRoute --> SavedPage
 
-    %% Session Interaction (Current)
+    %% Session Interaction (Frontend State Only)
     ChatRoute <--> SessionDeck
     ChatRoute <--> SessionMsgs
-    SaveRoute --> SessionSaved
-    LoadRoute <--> SessionSaved
-    LoadRoute --> SessionDeck
-    EditRoute <--> SessionSaved
-    DeleteRoute --> SessionSaved
-    CategoryRoute <--> SessionSaved
+    ChatRoute <--> SessionCtx
 
-    %% Frontend to Backend
-    ChatRoute -->|HTTP POST| ChatEndpoint
+    %% Frontend to Backend API Calls
+    ChatRoute -->|POST + current_deck| ChatEndpoint
+    SaveRoute -->|POST| DecksEndpoint
+    DecksRoute -->|GET| DecksEndpoint
+    LoadRoute -->|GET| DeckEndpoint
+    EditRoute -->|GET/PUT| DeckEndpoint
+    DeleteRoute -->|DELETE| DeckEndpoint
+    CategoryRoute -->|PUT| DeckEndpoint
+
+    %% Backend Deck Endpoints to Database
+    DecksEndpoint --> DatabaseSvc
+    DeckEndpoint --> DatabaseSvc
+    DatabaseSvc --> SavedDecksTable
+
+    %% Backend Chat Flow
     ChatEndpoint --> Orchestrator
 
     %% Backend Service Flow
@@ -130,29 +133,20 @@ flowchart TB
     ChatRoute -->|Update Session| SessionDeck
     ChatRoute -->|HTMX Swap| MainPage
 
-    %% Future Supabase Integration (Dashed)
-    SaveRoute -.->|Future: Create| DecksTable
-    LoadRoute -.->|Future: Read| DecksTable
-    EditRoute -.->|Future: Update| DecksTable
-    DeleteRoute -.->|Future: Delete| DecksTable
-    CategoryRoute -.->|Future: Update| DecksTable
-
-    SessionDeck -.->|Future: Sync| SessionsTable
-    SessionMsgs -.->|Future: Sync| SessionsTable
-    SessionCtx -.->|Future: Sync| SessionsTable
-
-    User -.->|Future: Login| Auth
-    Auth -.->|JWT Token| UsersTable
-
-    DecksTable -.->|Future: Realtime| SavedPage
+    %% Saved Deck Responses
+    DecksEndpoint -->|JSON| SaveRoute
+    DecksEndpoint -->|JSON List| DecksRoute
+    DeckEndpoint -->|JSON| LoadRoute
+    DeckEndpoint -->|JSON| EditRoute
+    LoadRoute -->|Update Session| SessionDeck
 
     %% Styling
     classDef current fill:#10b981,stroke:#059669,color:#fff
-    classDef future fill:#f59e0b,stroke:#d97706,color:#000
     classDef backend fill:#2563eb,stroke:#1d4ed8,color:#fff
-    classDef data fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    classDef database fill:#8b5cf6,stroke:#7c3aed,color:#fff
+    classDef data fill:#64748b,stroke:#475569,color:#fff
 
     class Frontend,Components,Routes,SessionStore current
-    class SupabaseFuture,Tables,SupabaseAPI,Auth future
     class Backend,Endpoints,Services,Orchestrator backend
+    class SQLiteDB,Tables,DatabaseSvc,CardsDBTable,SavedDecksTable database
     class Data,CardDB,VectorDB,CacheL1,CacheL2 data
