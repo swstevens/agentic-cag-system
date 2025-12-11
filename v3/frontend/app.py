@@ -143,56 +143,87 @@ async def post(deck_name: str, session):
 
     current_deck = session.get("deck")
     if not current_deck:
-        # No deck to save
-        return deck_list_component(None, session.get("saved_decks", []))
+        # No deck to save - fetch saved decks from backend
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{BACKEND_URL}/api/decks")
+                saved_decks = response.json() if response.status_code == 200 else []
+        except:
+            saved_decks = []
+        return deck_list_component(None, saved_decks)
 
-    # Create a saved deck entry
-    saved_deck = {
-        "name": deck_name,
-        "deck": current_deck.copy(),
-        "category": "Uncategorized",
-        "created_at": None  # Could add timestamp if needed
-    }
+    # Save deck to backend
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{BACKEND_URL}/api/decks",
+                json={
+                    "name": deck_name,
+                    "deck_data": current_deck,
+                    "category": "Uncategorized"
+                }
+            )
+            response.raise_for_status()
 
-    # Add to saved decks
-    if "saved_decks" not in session:
-        session["saved_decks"] = []
-    session["saved_decks"].append(saved_deck)
+        # Fetch updated list of saved decks
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BACKEND_URL}/api/decks")
+            saved_decks = response.json() if response.status_code == 200 else []
+
+    except Exception as e:
+        print(f"Error saving deck: {e}")
+        saved_decks = []
 
     # Return updated deck list
-    return deck_list_component(current_deck, session["saved_decks"])
+    return deck_list_component(current_deck, saved_decks)
 
 
 @rt("/decks")
-def get(session):
+async def get(session):
     """Render the saved decks page."""
     get_session_state(session)
+
+    # Fetch saved decks from backend
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BACKEND_URL}/api/decks")
+            saved_decks = response.json() if response.status_code == 200 else []
+    except Exception as e:
+        print(f"Error fetching decks: {e}")
+        saved_decks = []
+
     return Title("Saved Decks - MTG Deck Builder"), Main(
-        saved_decks_component(session.get("saved_decks", []))
+        saved_decks_component(saved_decks)
     )
 
 
-@rt("/load_deck/{index}")
-async def post(index: int, session):
+@rt("/load_deck/{deck_id}")
+async def post(deck_id: int, session):
     """Load a saved deck into the current deck."""
     get_session_state(session)
 
-    saved_decks = session.get("saved_decks", [])
-    if 0 <= index < len(saved_decks):
-        # Load the deck
-        session["deck"] = saved_decks[index]["deck"].copy()
-        # Update context
-        deck_data = session["deck"]
-        session["context"] = {
-            "format": deck_data.get("format"),
-            "colors": deck_data.get("colors", []),
-            "archetype": deck_data.get("archetype"),
-        }
-        # Add a message to chat
-        session["messages"].append({
-            "role": "assistant",
-            "content": f"Loaded deck: {saved_decks[index]['name']}"
-        })
+    # Fetch deck from backend
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BACKEND_URL}/api/decks/{deck_id}")
+            if response.status_code == 200:
+                saved_deck = response.json()
+                # Load the deck data
+                session["deck"] = saved_deck["deck_data"]
+                # Update context
+                deck_data = session["deck"]
+                session["context"] = {
+                    "format": deck_data.get("format"),
+                    "colors": deck_data.get("colors", []),
+                    "archetype": deck_data.get("archetype"),
+                }
+                # Add a message to chat
+                session["messages"].append({
+                    "role": "assistant",
+                    "content": f"Loaded deck: {saved_deck['name']}"
+                })
+    except Exception as e:
+        print(f"Error loading deck: {e}")
 
     # Return to main page
     return Title("MTG Deck Builder"), Main(
@@ -200,86 +231,115 @@ async def post(index: int, session):
     )
 
 
-@rt("/edit_deck/{index}")
-def get(index: int, session):
+@rt("/edit_deck/{deck_id}")
+async def get(deck_id: int, session):
     """Render edit form for a deck name."""
     get_session_state(session)
 
-    saved_decks = session.get("saved_decks", [])
-    if 0 <= index < len(saved_decks):
-        deck_data = saved_decks[index]
-        return Div(
-            Form(
-                Input(
-                    type="text",
-                    name="new_name",
-                    value=deck_data["name"],
-                    required=True,
-                    cls="deck-name-edit-input"
-                ),
-                Button("Save", type="submit", cls="deck-action-button save-button"),
-                Button("Cancel",
-                       hx_get=f"/cancel_edit/{index}",
-                       hx_target=f"#saved-deck-{index}",
-                       hx_swap="outerHTML",
-                       cls="deck-action-button cancel-button"),
-                hx_post=f"/save_edit/{index}",
-                hx_target=f"#saved-deck-{index}",
-                hx_swap="outerHTML",
-                cls="edit-deck-form"
-            ),
-            id=f"saved-deck-{index}",
-            cls="saved-deck-item editing"
-        )
-    return Div()  # Return empty if index invalid
+    # Fetch deck from backend
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BACKEND_URL}/api/decks/{deck_id}")
+            if response.status_code == 200:
+                deck_data = response.json()
+                return Div(
+                    Form(
+                        Input(
+                            type="text",
+                            name="new_name",
+                            value=deck_data["name"],
+                            required=True,
+                            cls="deck-name-edit-input"
+                        ),
+                        Button("Save", type="submit", cls="deck-action-button save-button"),
+                        Button("Cancel",
+                               hx_get=f"/cancel_edit/{deck_id}",
+                               hx_target=f"#saved-deck-{deck_id}",
+                               hx_swap="outerHTML",
+                               cls="deck-action-button cancel-button"),
+                        hx_post=f"/save_edit/{deck_id}",
+                        hx_target=f"#saved-deck-{deck_id}",
+                        hx_swap="outerHTML",
+                        cls="edit-deck-form"
+                    ),
+                    id=f"saved-deck-{deck_id}",
+                    cls="saved-deck-item editing"
+                )
+    except Exception as e:
+        print(f"Error fetching deck for edit: {e}")
+
+    return Div()
 
 
-@rt("/save_edit/{index}")
-async def post(index: int, new_name: str, session):
+@rt("/save_edit/{deck_id}")
+async def post(deck_id: int, new_name: str, session):
     """Save edited deck name."""
     get_session_state(session)
 
-    saved_decks = session.get("saved_decks", [])
-    if 0 <= index < len(saved_decks):
-        saved_decks[index]["name"] = new_name
-        session["saved_decks"] = saved_decks
-        return saved_deck_item(saved_decks[index], index)
+    try:
+        # Update deck name in backend
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{BACKEND_URL}/api/decks/{deck_id}",
+                json={"name": new_name}
+            )
+            if response.status_code == 200:
+                saved_deck = response.json()
+                return saved_deck_item(saved_deck, deck_id)
+    except Exception as e:
+        print(f"Error saving deck name: {e}")
+
     return Div()
 
 
-@rt("/cancel_edit/{index}")
-def get(index: int, session):
+@rt("/cancel_edit/{deck_id}")
+async def get(deck_id: int, session):
     """Cancel editing and return to normal view."""
     get_session_state(session)
 
-    saved_decks = session.get("saved_decks", [])
-    if 0 <= index < len(saved_decks):
-        return saved_deck_item(saved_decks[index], index)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BACKEND_URL}/api/decks/{deck_id}")
+            if response.status_code == 200:
+                saved_deck = response.json()
+                return saved_deck_item(saved_deck, deck_id)
+    except Exception as e:
+        print(f"Error fetching deck: {e}")
+
     return Div()
 
 
-@rt("/update_category/{index}")
-async def post(index: int, category: str, session):
+@rt("/update_category/{deck_id}")
+async def post(deck_id: int, category: str, session):
     """Update deck category."""
     get_session_state(session)
 
-    saved_decks = session.get("saved_decks", [])
-    if 0 <= index < len(saved_decks):
-        saved_decks[index]["category"] = category
-        session["saved_decks"] = saved_decks
-        return saved_deck_item(saved_decks[index], index)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{BACKEND_URL}/api/decks/{deck_id}",
+                json={"category": category}
+            )
+            if response.status_code == 200:
+                saved_deck = response.json()
+                return saved_deck_item(saved_deck, deck_id)
+    except Exception as e:
+        print(f"Error updating category: {e}")
+
     return Div()
 
 
-@rt("/delete_deck/{index}")
-async def delete(index: int, session):
+@rt("/delete_deck/{deck_id}")
+async def delete(deck_id: int, session):
     """Delete a saved deck."""
     get_session_state(session)
 
-    saved_decks = session.get("saved_decks", [])
-    if 0 <= index < len(saved_decks):
-        del saved_decks[index]
-        session["saved_decks"] = saved_decks
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(f"{BACKEND_URL}/api/decks/{deck_id}")
+            response.raise_for_status()
+    except Exception as e:
+        print(f"Error deleting deck: {e}")
 
     # Return empty - the item will be removed from the DOM
     return Div()

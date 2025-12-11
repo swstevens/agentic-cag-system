@@ -16,7 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from v3.fsm.orchestrator import FSMOrchestrator
-from v3.models.deck import Deck
+from v3.models.deck import Deck, SavedDeckCreate, SavedDeckUpdate, SavedDeckResponse
+from v3.database.database_service import DatabaseService
 
 
 # Request/Response Models
@@ -24,6 +25,7 @@ class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
     message: str
     context: Optional[Dict[str, Any]] = None
+    current_deck: Optional[Dict[str, Any]] = None  # Current deck for refinement
 
 
 class ChatResponse(BaseModel):
@@ -49,8 +51,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize orchestrator
+# Initialize orchestrator and database
 orchestrator = FSMOrchestrator()
+db = DatabaseService()
 
 
 def parse_deck_request(message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -229,6 +232,124 @@ async def chat(request: ChatRequest) -> ChatResponse:
             deck=None,
             error=error_msg
         )
+
+
+# Saved Decks CRUD Endpoints
+
+@app.post("/api/decks", response_model=SavedDeckResponse)
+async def create_deck(deck: SavedDeckCreate) -> SavedDeckResponse:
+    """
+    Save a new deck to the database.
+
+    Args:
+        deck: Deck creation request with name, deck_data, and category
+
+    Returns:
+        Created deck with ID and timestamps
+    """
+    try:
+        deck_id = db.create_saved_deck(
+            name=deck.name,
+            deck_data=deck.deck_data,
+            category=deck.category
+        )
+
+        saved_deck = db.get_saved_deck(deck_id)
+        if not saved_deck:
+            raise HTTPException(status_code=500, detail="Failed to retrieve created deck")
+
+        return SavedDeckResponse(**saved_deck)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving deck: {str(e)}")
+
+
+@app.get("/api/decks", response_model=List[SavedDeckResponse])
+async def get_all_decks(category: Optional[str] = None) -> List[SavedDeckResponse]:
+    """
+    Get all saved decks, optionally filtered by category.
+
+    Args:
+        category: Optional category filter
+
+    Returns:
+        List of all saved decks
+    """
+    try:
+        decks = db.get_all_saved_decks(category=category)
+        return [SavedDeckResponse(**deck) for deck in decks]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching decks: {str(e)}")
+
+
+@app.get("/api/decks/{deck_id}", response_model=SavedDeckResponse)
+async def get_deck(deck_id: int) -> SavedDeckResponse:
+    """
+    Get a specific saved deck by ID.
+
+    Args:
+        deck_id: Deck ID
+
+    Returns:
+        Saved deck data
+    """
+    deck = db.get_saved_deck(deck_id)
+    if not deck:
+        raise HTTPException(status_code=404, detail=f"Deck with ID {deck_id} not found")
+
+    return SavedDeckResponse(**deck)
+
+
+@app.put("/api/decks/{deck_id}", response_model=SavedDeckResponse)
+async def update_deck(deck_id: int, deck_update: SavedDeckUpdate) -> SavedDeckResponse:
+    """
+    Update a saved deck.
+
+    Args:
+        deck_id: Deck ID
+        deck_update: Fields to update (name, deck_data, category)
+
+    Returns:
+        Updated deck data
+    """
+    # Check if deck exists
+    existing_deck = db.get_saved_deck(deck_id)
+    if not existing_deck:
+        raise HTTPException(status_code=404, detail=f"Deck with ID {deck_id} not found")
+
+    # Update the deck
+    success = db.update_saved_deck(
+        deck_id=deck_id,
+        name=deck_update.name,
+        deck_data=deck_update.deck_data,
+        category=deck_update.category
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update deck")
+
+    # Return updated deck
+    updated_deck = db.get_saved_deck(deck_id)
+    return SavedDeckResponse(**updated_deck)
+
+
+@app.delete("/api/decks/{deck_id}")
+async def delete_deck(deck_id: int) -> Dict[str, str]:
+    """
+    Delete a saved deck.
+
+    Args:
+        deck_id: Deck ID
+
+    Returns:
+        Success message
+    """
+    success = db.delete_saved_deck(deck_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Deck with ID {deck_id} not found")
+
+    return {"message": f"Deck {deck_id} deleted successfully"}
 
 
 if __name__ == "__main__":

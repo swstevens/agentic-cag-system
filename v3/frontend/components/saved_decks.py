@@ -5,18 +5,19 @@ Saved decks page component for viewing and managing saved decks.
 from fasthtml.common import *
 
 
-def saved_deck_item(deck_data: dict, index: int) -> FT:
+def saved_deck_item(deck_data: dict, deck_id: int) -> FT:
     """
     Render a single saved deck item.
 
     Args:
-        deck_data: Saved deck dictionary with 'name', 'deck', 'category'
-        index: Index of the deck in the saved_decks list
+        deck_data: Saved deck dictionary with 'id', 'name', 'deck_data', 'category'
+        deck_id: ID of the deck in the database
 
     Returns:
         FastHTML component
     """
-    deck = deck_data["deck"]
+    # Handle both old format (deck) and new format (deck_data)
+    deck = deck_data.get("deck_data") or deck_data.get("deck", {})
     total_cards = deck.get("total_cards", 0)
     format_name = deck.get("format", "Unknown")
     archetype = deck.get("archetype", "Unknown")
@@ -36,13 +37,13 @@ def saved_deck_item(deck_data: dict, index: int) -> FT:
             ),
             Div(
                 Button("Load",
-                       hx_post=f"/load_deck/{index}",
+                       hx_post=f"/load_deck/{deck_id}",
                        hx_target="body",
                        hx_swap="outerHTML",
                        cls="deck-action-button load-button"),
                 Button("Edit Name",
-                       hx_get=f"/edit_deck/{index}",
-                       hx_target=f"#saved-deck-{index}",
+                       hx_get=f"/edit_deck/{deck_id}",
+                       hx_target=f"#saved-deck-{deck_id}",
                        hx_swap="outerHTML",
                        cls="deck-action-button edit-button"),
                 Form(
@@ -58,14 +59,14 @@ def saved_deck_item(deck_data: dict, index: int) -> FT:
                         value=deck_data.get("category", "Uncategorized")
                     ),
                     Button("Update Category", type="submit", cls="deck-action-button category-button"),
-                    hx_post=f"/update_category/{index}",
-                    hx_target=f"#saved-deck-{index}",
+                    hx_post=f"/update_category/{deck_id}",
+                    hx_target=f"#saved-deck-{deck_id}",
                     hx_swap="outerHTML",
                     cls="category-form"
                 ),
                 Button("Delete",
-                       hx_delete=f"/delete_deck/{index}",
-                       hx_target=f"#saved-deck-{index}",
+                       hx_delete=f"/delete_deck/{deck_id}",
+                       hx_target=f"#saved-deck-{deck_id}",
                        hx_swap="outerHTML",
                        hx_confirm="Are you sure you want to delete this deck?",
                        cls="deck-action-button delete-button"),
@@ -73,7 +74,7 @@ def saved_deck_item(deck_data: dict, index: int) -> FT:
             ),
             cls="saved-deck-content"
         ),
-        id=f"saved-deck-{index}",
+        id=f"saved-deck-{deck_id}",
         cls="saved-deck-item"
     )
 
@@ -95,7 +96,8 @@ def saved_decks_component(saved_decks: list) -> FT:
             cls="saved-decks-empty"
         )
     else:
-        deck_items = [saved_deck_item(deck, i) for i, deck in enumerate(saved_decks)]
+        # Use deck ID from backend instead of index
+        deck_items = [saved_deck_item(deck, deck["id"]) for deck in saved_decks]
         content = Div(*deck_items, cls="saved-decks-list")
 
     return Div(

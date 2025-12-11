@@ -95,10 +95,34 @@ class DatabaseService:
             """)
             
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_rarity 
+                CREATE INDEX IF NOT EXISTS idx_rarity
                 ON cards(rarity)
             """)
-            
+
+            # Create saved_decks table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS saved_decks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    deck_data TEXT NOT NULL,
+                    category TEXT DEFAULT 'Uncategorized',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Create index on deck name for faster searches
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_deck_name
+                ON saved_decks(name)
+            """)
+
+            # Create index on category for filtering
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_deck_category
+                ON saved_decks(category)
+            """)
+
             conn.commit()
     
     def insert_card(self, card_data: Dict[str, Any]) -> None:
@@ -359,7 +383,7 @@ class DatabaseService:
     def get_card_count(self) -> int:
         """
         Get total number of cards in database.
-        
+
         Returns:
             Card count
         """
@@ -367,3 +391,153 @@ class DatabaseService:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM cards")
             return cursor.fetchone()[0]
+
+    # Saved Decks CRUD Operations
+
+    def create_saved_deck(self, name: str, deck_data: Dict[str, Any], category: str = "Uncategorized") -> int:
+        """
+        Save a deck to the database.
+
+        Args:
+            name: Deck name
+            deck_data: Dictionary containing deck data (will be serialized to JSON)
+            category: Deck category
+
+        Returns:
+            ID of the created deck
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO saved_decks (name, deck_data, category)
+                VALUES (?, ?, ?)
+            """, (name, json.dumps(deck_data), category))
+            return cursor.lastrowid
+
+    def get_saved_deck(self, deck_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get a saved deck by ID.
+
+        Args:
+            deck_id: Deck ID
+
+        Returns:
+            Deck dictionary or None if not found
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM saved_decks WHERE id = ?", (deck_id,))
+            row = cursor.fetchone()
+
+            if row:
+                return self._deck_row_to_dict(row)
+            return None
+
+    def get_all_saved_decks(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get all saved decks, optionally filtered by category.
+
+        Args:
+            category: Optional category filter
+
+        Returns:
+            List of deck dictionaries
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            if category:
+                cursor.execute(
+                    "SELECT * FROM saved_decks WHERE category = ? ORDER BY updated_at DESC",
+                    (category,)
+                )
+            else:
+                cursor.execute("SELECT * FROM saved_decks ORDER BY updated_at DESC")
+
+            rows = cursor.fetchall()
+            return [self._deck_row_to_dict(row) for row in rows]
+
+    def update_saved_deck(
+        self,
+        deck_id: int,
+        name: Optional[str] = None,
+        deck_data: Optional[Dict[str, Any]] = None,
+        category: Optional[str] = None
+    ) -> bool:
+        """
+        Update a saved deck.
+
+        Args:
+            deck_id: Deck ID
+            name: New deck name (optional)
+            deck_data: New deck data (optional)
+            category: New category (optional)
+
+        Returns:
+            True if updated, False if deck not found
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build dynamic update query
+            updates = []
+            params = []
+
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+
+            if deck_data is not None:
+                updates.append("deck_data = ?")
+                params.append(json.dumps(deck_data))
+
+            if category is not None:
+                updates.append("category = ?")
+                params.append(category)
+
+            if not updates:
+                return False
+
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(deck_id)
+
+            query = f"UPDATE saved_decks SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+
+            return cursor.rowcount > 0
+
+    def delete_saved_deck(self, deck_id: int) -> bool:
+        """
+        Delete a saved deck.
+
+        Args:
+            deck_id: Deck ID
+
+        Returns:
+            True if deleted, False if deck not found
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM saved_decks WHERE id = ?", (deck_id,))
+            return cursor.rowcount > 0
+
+    def _deck_row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
+        """
+        Convert saved deck row to dictionary.
+
+        Args:
+            row: SQLite row object
+
+        Returns:
+            Dictionary with parsed deck data
+        """
+        data = dict(row)
+
+        # Parse deck_data JSON
+        if data.get('deck_data'):
+            try:
+                data['deck_data'] = json.loads(data['deck_data'])
+            except (json.JSONDecodeError, TypeError):
+                data['deck_data'] = {}
+
+        return data

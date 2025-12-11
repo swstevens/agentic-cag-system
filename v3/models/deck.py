@@ -189,3 +189,29 @@ class CardSearchFilters(BaseModel):
     format_legal: Optional[str] = None
     text_query: Optional[str] = None
     limit: int = Field(100, ge=1, le=1000)
+
+
+# Saved Deck Models
+
+class SavedDeckCreate(BaseModel):
+    """Request to save a deck."""
+    name: str = Field(..., description="Deck name", min_length=1, max_length=200)
+    deck_data: Dict[str, Any] = Field(..., description="Complete deck data as dictionary")
+    category: str = Field("Uncategorized", description="Deck category")
+
+
+class SavedDeckUpdate(BaseModel):
+    """Request to update a saved deck."""
+    name: Optional[str] = Field(None, description="New deck name", min_length=1, max_length=200)
+    deck_data: Optional[Dict[str, Any]] = Field(None, description="Updated deck data")
+    category: Optional[str] = Field(None, description="New category")
+
+
+class SavedDeckResponse(BaseModel):
+    """Response containing a saved deck."""
+    id: int = Field(..., description="Deck ID")
+    name: str = Field(..., description="Deck name")
+    deck_data: Dict[str, Any] = Field(..., description="Complete deck data")
+    category: str = Field(..., description="Deck category")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last update timestamp")
