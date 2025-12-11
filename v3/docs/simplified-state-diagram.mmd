@@ -1,0 +1,67 @@
+---
+title: MTG Deck Builder - Simplified State Diagram
+---
+
+stateDiagram-v2
+    [*] --> Empty: App Start
+
+    Empty --> Building: User Sends Message
+    Building --> DeckReady: Deck Received from API
+
+    DeckReady --> Building: Continue Chatting
+    DeckReady --> Saving: Click Save Deck
+    DeckReady --> ViewingSaved: Click View Saved
+
+    Saving --> DeckReady: Deck Saved
+
+    ViewingSaved --> DeckReady: Load Deck
+    ViewingSaved --> EditingDeck: Edit/Categorize
+    ViewingSaved --> Empty: Delete Deck
+
+    EditingDeck --> ViewingSaved: Save Changes
+
+    Empty --> ViewingSaved: Click View Saved
+
+    note right of Empty
+        State: No active deck
+        Display: Empty deck panel + chat
+        Actions: Send message, view saved
+    end note
+
+    note right of Building
+        State: Waiting for API
+        Display: Loading indicator
+        Backend: Multi-agent processing
+    end note
+
+    note right of DeckReady
+        State: Deck loaded in session
+        Display: Card list + stats + save form
+        Actions: Continue building, save, view saved
+    end note
+
+    note right of Saving
+        State: Persisting to storage
+        Future: Supabase INSERT
+        Current: Session append
+    end note
+
+    note right of ViewingSaved
+        State: Saved decks list
+        Display: All saved decks with actions
+        Actions: Load, edit, categorize, delete
+    end note
+
+    note right of EditingDeck
+        State: Editing deck metadata
+        Display: Inline edit form
+        Actions: Rename, categorize, delete
+    end note
+
+classDef active fill:#10b981,stroke:#059669,color:#fff
+classDef transition fill:#f59e0b,stroke:#d97706,color:#fff
+classDef management fill:#2563eb,stroke:#1d4ed8,color:#fff
+
+class Empty,Building,DeckReady active
+class Saving transition
+class ViewingSaved,EditingDeck management

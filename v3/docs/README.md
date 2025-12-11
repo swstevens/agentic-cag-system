@@ -4,7 +4,30 @@ This directory contains Mermaid diagrams documenting the FastHTML frontend archi
 
 ## Diagrams
 
-### 1. FSM Architecture (`frontend-fsm-architecture.mmd`)
+### 1. Simplified State Diagram (`simplified-state-diagram.mmd`) ⭐ **Start Here**
+
+**Purpose**: High-level overview with 6 core states showing the essential user flow.
+
+**States**:
+- **Empty**: No deck loaded, fresh start
+- **Building**: Chat active, waiting for API response
+- **DeckReady**: Deck displayed with save option
+- **Saving**: Persisting deck to storage
+- **ViewingSaved**: Managing saved decks list
+- **EditingDeck**: Editing deck metadata
+
+**Transitions**:
+- User sends message → Building → DeckReady
+- Save deck → Saving → DeckReady
+- View saved decks → ViewingSaved
+- Edit/Delete operations in ViewingSaved
+
+**Color Coding**:
+- 🟢 Green: Active deck-building states
+- 🟠 Orange: Transition/saving state
+- 🔵 Blue: Deck management states
+
+### 2. FSM Architecture (`frontend-fsm-architecture.mmd`)
 
 **Purpose**: Documents the Finite State Machine architecture showing all possible states and transitions in the frontend application.
 
@@ -32,7 +55,7 @@ This directory contains Mermaid diagrams documenting the FastHTML frontend archi
 - **Future**: Supabase (persistent storage with auth)
 - **Backend**: FastAPI multi-agent system
 
-### 2. Data Flow Diagram (`data-flow-diagram.mmd`)
+### 3. Data Flow Diagram (`data-flow-diagram.mmd`)
 
 **Purpose**: Shows how data flows through the system from user interaction to database storage and back.
 
