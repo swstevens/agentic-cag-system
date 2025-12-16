@@ -3,7 +3,12 @@
 ## Overview
 V3 is a complete architectural redesign using a Finite State Machine (FSM) pattern with Pydantic's graph module. This approach simplifies the agentic systems by constraining operations to three primary states.
 
-## Architecture
+## Documentation
+- [**Getting Started**](docs/GETTING_STARTED.md): Installation and setup guide.
+- [**Backend Architecture**](docs/ARCHITECTURE_BACKEND.md): Deep dive into API, FSM, and Services.
+- [**Frontend Architecture**](docs/ARCHITECTURE_FRONTEND.md): Overview of FastHTML frontend and components.
+- [**Workflows**](docs/WORKFLOWS.md): Detailed FSM and user interaction flows.
+
 
 ### FSM States
 1. **Parse Request/Orchestrator**: Parse incoming requests and orchestrate workflow
