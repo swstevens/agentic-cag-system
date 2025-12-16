@@ -126,11 +126,11 @@ class DeckRepository:
             query = "SELECT * FROM decks WHERE 1=1"
             params = []
 
-            if format_filter:
+            if format_filter and format_filter != "All Formats":
                 query += " AND LOWER(format) = LOWER(?)"
                 params.append(format_filter)
 
-            if archetype_filter:
+            if archetype_filter and archetype_filter != "All Archetypes":
                 query += " AND LOWER(archetype) = LOWER(?)"
                 params.append(archetype_filter)
 

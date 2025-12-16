@@ -116,7 +116,7 @@ def deck_library_component(decks: list, format_filter: str = None, archetype_fil
         Div(
             Label("Format:", For="format-filter"),
             Select(
-                Option("All Formats", value="", selected=(not format_filter)),
+                Option("All Formats", value="", selected=(not format_filter or format_filter == "All Formats")),
                 *[Option(f, value=f, selected=(format_filter == f)) for f in formats],
                 name="format",
                 id="format-filter",
@@ -124,7 +124,7 @@ def deck_library_component(decks: list, format_filter: str = None, archetype_fil
             ),
             Label("Archetype:", For="archetype-filter"),
             Select(
-                Option("All Archetypes", value="", selected=(not archetype_filter)),
+                Option("All Archetypes", value="", selected=(not archetype_filter or archetype_filter == "All Archetypes")),
                 *[Option(a, value=a, selected=(archetype_filter == a)) for a in archetypes],
                 name="archetype",
                 id="archetype-filter",
