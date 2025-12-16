@@ -25,6 +25,31 @@ def chat_message(role: str, content: str) -> FT:
     )
 
 
+def thinking_message() -> FT:
+    """
+    Render the thinking indicator with auto-trigger for cascading requests.
+    
+    Returns:
+        FastHTML component that:
+        1. Looks like an assistant message
+        2. Triggers /chat/process on load
+        3. Disables the chat form elements while active
+    """
+    return Div(
+        Div(
+            P("Thinking... 🤔", cls="message-content"),
+            cls="message message-assistant"
+        ),
+        cls="message-wrapper",
+        id="thinking-indicator",
+        hx_post="/chat/process",
+        hx_trigger="load",
+        hx_target="#main-content",
+        hx_swap="outerHTML",
+        hx_disabled_elt=".chat-input, .chat-submit"
+    )
+
+
 def chat_component(messages: list, has_deck: bool = False, deck_id: str = None) -> FT:
     """
     Render the chat interface component.
@@ -67,15 +92,15 @@ def chat_component(messages: list, has_deck: bool = False, deck_id: str = None) 
                 placeholder="Type your message...",
                 required=True,
                 autofocus=True,
-                cls="chat-input"
+                cls="chat-input",
+                id="chat-input-field"
             ),
             Button("Send", type="submit", cls="chat-submit"),
             cls="chat-input-group"
         ),
         hx_post="/chat",
-        hx_target="#main-content",
-        hx_select="#main-content",
-        hx_swap="outerHTML",
+        hx_target="#chat-history",
+        hx_swap="beforeend",
         cls="chat-form"
     )
 

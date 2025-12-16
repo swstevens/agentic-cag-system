@@ -13,7 +13,7 @@ from fasthtml.common import *
 from dotenv import load_dotenv
 
 from components.deck_list import deck_list_component
-from components.chat import chat_component, chat_message
+from components.chat import chat_component, chat_message, thinking_message
 from components.deck_library import deck_library_component
 
 # Load environment variables
@@ -77,13 +77,62 @@ def get(session):
 
 @rt("/chat")
 async def post(message: str, session):
-    """Handle chat message submission."""
+    """
+    Handle initial chat submission (Fast UI response).
+    
+    1. Updates session with user message.
+    2. Returns:
+       - User Message (appended to history)
+       - Thinking Indicator (appended to history, triggers processing)
+       - Cleared Input (swapped OOB)
+    """
     get_session_state(session)
     
     # Add user message to history
     session["messages"].append({"role": "user", "content": message})
     
-    # DEBUG: Test command to verify frontend updating
+    # 1. Render User Message
+    user_msg_html = chat_message("user", message)
+    
+    # 2. Render Thinking Indicator with Auto-Trigger
+    thinking_html = thinking_message()
+    
+    # 3. Render Cleared Input (OOB Swap)
+    # Replaces the input field with a cleared one to reset the form
+    new_input_html = Input(
+        type="text",
+        name="message",
+        placeholder="Type your message...",
+        required=True,
+        autofocus=True,
+        cls="chat-input",
+        id="chat-input-field", # Ensure ID matches for specificity if needed, though OOB usually needs ID on target
+        hx_swap_oob="true" # This tells HTMX to swap this element by ID
+    )
+    
+    # Return all elements. HTMX will append non-OOB ones to target (#chat-history)
+    # and swap OOB ones by ID.
+    return user_msg_html, thinking_html, new_input_html
+
+
+@rt("/chat/process")
+async def post(session):
+    """
+    Handle background chat processing (Heavy backend call).
+    
+    Triggered by the 'Thinking' indicator loading.
+    Returns the full updated content, replacing the temporary state.
+    """
+    get_session_state(session)
+    
+    # Get the last message which is the user's prompt
+    if not session["messages"] or session["messages"][-1]["role"] != "user":
+        # Should not happen in normal flow, but handle gracefully
+        return render_content(session)
+        
+    message = session["messages"][-1]["content"]
+
+    # DEBUG: Test command
     if message == "!test_deck":
         print("DEBUG: Executing !test_deck command")
         mock_deck = {
@@ -96,15 +145,14 @@ async def post(message: str, session):
             ]
         }
         session["deck"] = mock_deck
-        session["deck_id"] = None  # Reset deck_id for new mock deck
+        session["deck_id"] = None
         session["messages"].append({"role": "assistant", "content": "Debug: Loaded mock deck."})
-        print(f"DEBUG: Session deck updated: {session['deck']}")
         return render_content(session)
 
     try:
         # Call backend API
-        print(f"DEBUG: Sending request to {BACKEND_URL}/api/chat")
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        print(f"DEBUG: Sending request to {BACKEND_URL}/api/chat for message: {message}")
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{BACKEND_URL}/api/chat",
                 json={
@@ -114,28 +162,19 @@ async def post(message: str, session):
             )
             response.raise_for_status()
             data = response.json()
-            print(f"DEBUG: Received response: {data.keys()}")
         
         # Extract response
         assistant_message = data.get("message", "No response")
         deck_data = data.get("deck")
-        error = data.get("error")
         
-        print(f"DEBUG: deck_data present: {deck_data is not None}")
-        if deck_data:
-            print(f"DEBUG: deck_data keys: {deck_data.keys()}")
-
         # Update session with deck if provided
         if deck_data:
             session["deck"] = deck_data
-            # Update context with deck parameters
             session["context"] = {
                 "format": deck_data.get("format"),
                 "colors": deck_data.get("colors", []),
                 "archetype": deck_data.get("archetype"),
             }
-            print(f"DEBUG: Session deck updated from backend - Total cards: {deck_data.get('total_cards', 0)}")
-            print(f"DEBUG: Session keys after update: {list(session.keys())}")
         
         # Add assistant message to history
         session["messages"].append({"role": "assistant", "content": assistant_message})
@@ -149,7 +188,7 @@ async def post(message: str, session):
         print(f"DEBUG: Exception: {e}")
         session["messages"].append({"role": "assistant", "content": error_message})
     
-    # Return the updated main content
+    # Return the updated main content (removes thinking indicator, shows new history)
     return render_content(session)
 
 

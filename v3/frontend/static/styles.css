@@ -519,9 +519,19 @@ details[open] .deck-arrow-icon {
 }
 
 /* Loading State */
-.htmx-request .chat-submit {
-    opacity: 0.6;
+.htmx-request .chat-submit,
+.chat-submit:disabled,
+.chat-submit[disabled] {
+    opacity: 0.5;
     cursor: not-allowed;
+    background-color: var(--text-secondary);
+}
+
+.chat-input:disabled,
+.chat-input[disabled] {
+    opacity: 0.7;
+    cursor: not-allowed;
+    background-color: var(--surface-color);
 }
 
 /* Button Styles */
