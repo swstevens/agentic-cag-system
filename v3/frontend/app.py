@@ -7,6 +7,7 @@ Provides a web interface with deck list and chat components.
 import asyncio
 import httpx
 import os
+import logging
 from pathlib import Path
 import uuid
 from fasthtml.common import *
@@ -28,6 +29,13 @@ app, rt = fast_app(
     pico=False,  # Disable Pico CSS to avoid conflicts
     secret_key=os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")  # Enable FastHTML sessions
 )
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Backend API URL
 BACKEND_URL = "http://localhost:8000"
@@ -134,7 +142,7 @@ async def post(session):
 
     # DEBUG: Test command
     if message == "!test_deck":
-        print("DEBUG: Executing !test_deck command")
+        logger.info("Executing !test_deck command")
         mock_deck = {
             "format": "Standard",
             "archetype": "Red Deck Wins",
@@ -151,7 +159,7 @@ async def post(session):
 
     try:
         # Call backend API
-        print(f"DEBUG: Sending request to {BACKEND_URL}/api/chat for message: {message}")
+        logger.info(f"Sending request to {BACKEND_URL}/api/chat for message: {message}")
         async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{BACKEND_URL}/api/chat",
@@ -181,11 +189,11 @@ async def post(session):
         
     except httpx.HTTPError as e:
         error_message = f"Error connecting to backend: {str(e)}"
-        print(f"DEBUG: HTTP Error: {e}")
+        logger.error(f"HTTP Error: {e}", exc_info=True)
         session["messages"].append({"role": "assistant", "content": error_message})
     except Exception as e:
         error_message = f"Unexpected error: {str(e)}"
-        print(f"DEBUG: Exception: {e}")
+        logger.error(f"Exception: {e}", exc_info=True)
         session["messages"].append({"role": "assistant", "content": error_message})
     
     # Return the updated main content (removes thinking indicator, shows new history)
@@ -225,7 +233,7 @@ async def get(session, format: str = "", archetype: str = ""):
         )
 
     except Exception as e:
-        print(f"Error loading decks: {e}")
+        logger.error(f"Error loading decks: {e}", exc_info=True)
         return Title("My Decks - MTG Deck Builder"), Main(
             Div(
                 H1("Error Loading Decks"),
@@ -271,7 +279,7 @@ async def get(deck_id: str, session):
         )
 
     except Exception as e:
-        print(f"Error loading deck {deck_id}: {e}")
+        logger.error(f"Error loading deck {deck_id}: {e}", exc_info=True)
         session["messages"].append(
             {"role": "assistant", "content": f"Failed to load deck: {str(e)}"}
         )
@@ -295,7 +303,7 @@ async def get(deck_id: str, session):
         return render_card_groups(data["deck"])
 
     except Exception as e:
-        print(f"Error loading snippet for {deck_id}: {e}")
+        logger.error(f"Error loading snippet for {deck_id}: {e}", exc_info=True)
         return Div(
             P(f"Failed to load cards: {str(e)}", cls="error-message"),
             cls="deck-expanded-content"
@@ -305,10 +313,11 @@ async def get(deck_id: str, session):
 @rt("/save-deck-modal")
 def get(session):
     """Render the save deck modal."""
-    print(f"DEBUG save-deck-modal: Session keys: {list(session.keys())}")
-    print(f"DEBUG save-deck-modal: Has deck: {session.get('deck') is not None}")
+    # logger.debug(f"save-deck-modal: Session keys: {list(session.keys())}")
+    # logger.debug(f"save-deck-modal: Has deck: {session.get('deck') is not None}")
     if session.get("deck"):
-        print(f"DEBUG save-deck-modal: Deck total cards: {session['deck'].get('total_cards', 0)}")
+        pass
+        # logger.debug(f"save-deck-modal: Deck total cards: {session['deck'].get('total_cards', 0)}")
 
     if not session.get("deck"):
         return Div(
@@ -444,7 +453,7 @@ async def post(name: str, description: str = "", session = None):
             raise Exception(data.get("error", "Unknown error"))
 
     except Exception as e:
-        print(f"Error saving deck: {e}")
+        logger.error(f"Error saving deck: {e}", exc_info=True)
         return Div(
             Div(
                 H2("Save Failed"),
@@ -489,7 +498,7 @@ async def post(session):
             raise Exception(data.get("error", "Unknown error"))
 
     except Exception as e:
-        print(f"Error updating deck: {e}")
+        logger.error(f"Error updating deck: {e}", exc_info=True)
         session["messages"].append(
             {"role": "assistant", "content": f"❌ Failed to update deck: {str(e)}"}
         )
@@ -524,7 +533,7 @@ async def delete(deck_id: str):
             raise Exception(data.get("error", "Unknown error"))
 
     except Exception as e:
-        print(f"Error deleting deck: {e}")
+        logger.error(f"Error deleting deck: {e}", exc_info=True)
         return Div(
             H1("Error"),
             P(f"Failed to delete deck: {str(e)}"),
@@ -536,6 +545,6 @@ async def delete(deck_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting FastHTML frontend on http://localhost:5000")
-    print("Make sure FastAPI backend is running on http://localhost:8000")
+    logger.info("Starting FastHTML frontend on http://localhost:5000")
+    logger.info("Make sure FastAPI backend is running on http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=5000)

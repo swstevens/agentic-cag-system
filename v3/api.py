@@ -6,6 +6,7 @@ Exposes REST API endpoints that wrap the FSM orchestrator.
 
 import asyncio
 import re
+import logging
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
 
@@ -20,6 +21,12 @@ from v3.models.deck import Deck, DeckModificationRequest
 from v3.database.deck_repository import DeckRepository
 from v3.database.database_service import DatabaseService
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Request/Response Models
 class ChatRequest(BaseModel):
@@ -279,15 +286,15 @@ async def chat(request: ChatRequest) -> ChatResponse:
         else:
             # NEW DECK FLOW
             deck_request = parse_deck_request(request.message, request.context)
-            print(f"DEBUG: Parsed request: {deck_request}")
+            logger.info(f"Parsed request: {deck_request}")
 
             result = await orchestrator.execute(deck_request)
-            print(f"DEBUG: FSM Result success: {result['success']}")
+            logger.info(f"FSM Result success: {result['success']}")
 
             if result["success"]:
                 data = result["data"]
                 deck_dict = data["deck"]
-                print(f"DEBUG: Deck built: {deck_dict.get('archetype')} - {deck_dict.get('total_cards')} cards")
+                logger.info(f"Deck built: {deck_dict.get('archetype')} - {deck_dict.get('total_cards')} cards")
                 quality_metrics = data["quality_metrics"]
 
                 # Format response message
@@ -326,6 +333,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"Error in chat endpoint: {e}", exc_info=True)
         return ChatResponse(
             message=f"❌ An error occurred: {error_msg}",
             deck=None,
@@ -365,6 +373,7 @@ async def save_deck(request: SaveDeckRequest) -> SaveDeckResponse:
 
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"Error saving deck: {e}", exc_info=True)
         return SaveDeckResponse(
             success=False,
             deck_id=None,
@@ -433,6 +442,7 @@ async def list_decks(
 
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"Error listing decks: {e}", exc_info=True)
         return DeckListResponse(
             success=False,
             decks=[],
@@ -477,6 +487,7 @@ async def get_deck(deck_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error getting deck {deck_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -520,6 +531,7 @@ async def update_deck(deck_id: str, request: UpdateDeckRequest) -> UpdateDeckRes
 
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"Error updating deck {deck_id}: {e}", exc_info=True)
         return UpdateDeckResponse(
             success=False,
             message="Failed to update deck",
@@ -556,6 +568,7 @@ async def delete_deck(deck_id: str) -> DeleteDeckResponse:
 
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"Error deleting deck {deck_id}: {e}", exc_info=True)
         return DeleteDeckResponse(
             success=False,
             message="Failed to delete deck",

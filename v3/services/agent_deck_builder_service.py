@@ -5,6 +5,8 @@ Uses LLM reasoning with tool-calling to make intelligent decisions
 about deck construction and refinement.
 """
 
+import logging
+import os
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
@@ -19,6 +21,8 @@ from ..models.deck import (
 from ..models.format_rules import FormatRules
 from ..database.card_repository import CardRepository
 from .prompt_builder import PromptBuilder
+
+logger = logging.getLogger(__name__)
 
 
 # Tool response models
@@ -70,18 +74,20 @@ class AgentDeckBuilderService:
     def __init__(
         self,
         card_repository: CardRepository,
-        model_name: str = "openai:gpt-4o"
+        model_name: Optional[str] = None
     ):
         """
         Initialize agent deck builder.
 
         Args:
             card_repository: Card repository for data access
-            model_name: LLM model to use
+            model_name: LLM model to use (defaults to env var or gpt-4o-mini)
         """
         self.card_repo = card_repository
         self.current_request = None  # Store current request for tool access
-        self.model_name = model_name
+        
+        # Use provided model, or env var, or default
+        self.model_name = model_name or os.getenv("DEFAULT_MODEL", "openai:gpt-4o-mini")
 
         # Agents will be created dynamically per request with format-specific prompts
         # This allows us to use FormatRules data for accurate guidelines
@@ -262,7 +268,7 @@ Build a focused, consistent spell suite with clear synergies.
             return deck
 
         except Exception as e:
-            print(f"Agent deck building failed: {e}")
+            logger.error(f"Agent deck building failed: {e}", exc_info=True)
             # Fallback to simple construction
             return self._fallback_build(request)
         finally:
@@ -335,7 +341,7 @@ Suggestions:
             return deck
 
         except Exception as e:
-            print(f"Agent deck refinement failed: {e}")
+            logger.error(f"Agent deck refinement failed: {e}", exc_info=True)
             # Fallback to simple refinement
             return deck
         finally:
@@ -347,7 +353,7 @@ Suggestions:
         request: DeckBuildRequest
     ) -> Deck:
         """Execute the LLM's construction plan."""
-        print(f"Executing construction plan: {plan.strategy}")
+        logger.info(f"Executing construction plan: {plan.strategy}")
         
         deck = Deck(
             cards=[],
@@ -361,10 +367,8 @@ Suggestions:
         
         # Determine land count based on archetype
         land_count = self._get_land_count(request.archetype, target_size)
-        
-        print(f"Target deck size: {target_size}")
-        print(f"Land count: {land_count}")
-        print(f"Spell slots: {target_size - land_count}")
+
+        logger.info(f"Target deck size: {target_size}, Land count: {land_count}, Spell slots: {target_size - land_count}")
         
         # STEP 1: Add lands first
         if request.colors:
@@ -392,7 +396,7 @@ Suggestions:
         
         for i, selection in enumerate(plan.card_selections):
             if cards_added >= spell_slots:
-                print(f"Reached spell slot limit ({spell_slots}), stopping card additions")
+                logger.info(f"Reached spell slot limit ({spell_slots}), stopping card additions")
                 break
                 
             # CardSelection is now a proper model with attributes
@@ -400,7 +404,7 @@ Suggestions:
             quantity = selection.quantity
             
             if not card_name:
-                print(f"Warning: Selection {i} missing card_name: {selection}")
+                logger.warning(f"Selection {i} missing card_name: {selection}")
                 continue
             
             # Don't exceed remaining slots
@@ -411,28 +415,30 @@ Suggestions:
             if card:
                 # Skip lands (we already added them)
                 if "Land" not in card.types:
-                    print(f"Adding {quantity}x {card_name}")
+                    # logger.info(f"Adding {quantity}x {card_name}")
                     deck.cards.append(DeckCard(card=card, quantity=quantity))
                     cards_added += quantity
             else:
-                print(f"Warning: Card '{card_name}' not found in repository")
+                logger.warning(f"Card '{card_name}' not found in repository")
         
         # STEP 3: Fill remaining slots if needed
         if cards_added < spell_slots:
             remaining = spell_slots - cards_added
-            print(f"Warning: Only {cards_added}/{spell_slots} spell slots filled by LLM")
-            print(f"Filling {remaining} remaining slots with basic creatures/spells")
+            logger.warning(f"Only {cards_added}/{spell_slots} spell slots filled by LLM")
+            logger.info(f"Filling {remaining} remaining slots with basic creatures/spells")
             self._add_filler_cards(deck, remaining, request)
         
         # Validate card quantities based on format rules
         deck = self._validate_legendary_quantities(deck, request.format)
 
+        deck = self._validate_legendary_quantities(deck, request.format)
+
         deck.calculate_totals()
-        print(f"Deck built: {deck.total_cards} cards (target: {target_size})")
+        logger.info(f"Deck built: {deck.total_cards} cards (target: {target_size})")
 
         # Final validation
         if deck.total_cards != target_size:
-            print(f"ERROR: Deck size mismatch! Got {deck.total_cards}, expected {target_size}")
+            logger.error(f"Deck size mismatch! Got {deck.total_cards}, expected {target_size}")
 
         return deck
     
@@ -480,11 +486,10 @@ Suggestions:
         request: DeckBuildRequest
     ) -> Deck:
         """Execute the LLM's refinement plan."""
-        print(f"Executing refinement plan: {plan.analysis[:100]}...")
-        print(f"Actions: {len(plan.actions)}")
+        logger.info(f"Executing refinement plan: {plan.analysis[:100]}... Actions: {len(plan.actions)}")
         
         for action in plan.actions:
-            print(f"Action: {action.type} {action.quantity}x {action.card_name} - {action.reasoning[:50]}...")
+            # logger.info(f"Action: {action.type} {action.quantity}x {action.card_name}")
             
             if action.type == "remove":
                 deck = self._remove_card(deck, action.card_name, action.quantity)
@@ -498,12 +503,12 @@ Suggestions:
 
         if deck.total_cards < target_size:
             shortage = target_size - deck.total_cards
-            print(f"Warning: Deck is {shortage} cards short. Adding filler creatures...")
+            logger.warning(f"Deck is {shortage} cards short. Adding filler creatures...")
             self._add_filler_cards(deck, shortage, request)
         
         elif deck.total_cards > target_size:
             excess = deck.total_cards - target_size
-            print(f"Warning: Deck has {excess} excess cards. Trimming...")
+            logger.warning(f"Deck has {excess} excess cards. Trimming...")
             
             # Remove excess cards (prioritize 1-ofs and 2-ofs)
             deck.cards.sort(key=lambda dc: dc.quantity)  # Sort by quantity ascending
@@ -515,7 +520,7 @@ Suggestions:
                     to_remove = min(dc.quantity, excess)
                     dc.quantity -= to_remove
                     excess -= to_remove
-                    print(f"Trimming: Removing {to_remove}x {dc.card.name}")
+                    logger.info(f"Trimming: Removing {to_remove}x {dc.card.name}")
             
             # Remove cards with 0 quantity
             deck.cards = [dc for dc in deck.cards if dc.quantity > 0]
@@ -523,8 +528,10 @@ Suggestions:
         # Validate card quantities based on format rules before returning
         deck = self._validate_legendary_quantities(deck, request.format)
 
+        deck = self._validate_legendary_quantities(deck, request.format)
+
         deck.calculate_totals()
-        print(f"Final deck size after correction: {deck.total_cards}")
+        logger.info(f"Final deck size after correction: {deck.total_cards}")
 
         return deck
     
@@ -635,17 +642,17 @@ Suggestions:
                 if qty > 0:
                     existing.quantity += qty
                     needed -= qty
-                    print(f"Filler: Increasing {filler_card.name} by {qty}")
+                    logger.info(f"Filler: Increasing {filler_card.name} by {qty}")
             else:
                 # Add new card (respecting copy limit)
                 qty = min(copy_limit, needed)
                 deck.cards.append(DeckCard(card=filler_card, quantity=qty))
                 needed -= qty
-                print(f"Filler: Adding {qty}x {filler_card.name}")
+                logger.info(f"Filler: Adding {qty}x {filler_card.name}")
         
         # Fallback: add lands if still needed
         if needed > 0:
-            print(f"Still {needed} cards needed. Adding lands...")
+            logger.info(f"Still {needed} cards needed. Adding lands...")
             land_card = next((dc for dc in deck.cards if "Land" in dc.card.types), None)
             if land_card:
                 land_card.quantity += needed
@@ -706,7 +713,7 @@ Suggestions:
             if is_singleton:
                 # Commander/singleton rule: 1 copy max for non-lands
                 if not is_basic_land and deck_card.quantity > 1:
-                    print(f"Commander singleton: '{card.name}' had {deck_card.quantity} copies, capping at 1")
+                    logger.info(f"Commander singleton: '{card.name}' had {deck_card.quantity} copies, capping at 1")
                     deck_card.quantity = 1
             else:
                 # Standard copy limits (basic lands are exempt)
@@ -718,10 +725,10 @@ Suggestions:
                 legendary_max = FormatRules.get_legendary_max(format_name)
 
                 if is_legendary and deck_card.quantity > legendary_max:
-                    print(f"Legendary card '{card.name}' had {deck_card.quantity} copies, capping at {legendary_max}")
+                    logger.info(f"Legendary card '{card.name}' had {deck_card.quantity} copies, capping at {legendary_max}")
                     deck_card.quantity = legendary_max
                 elif deck_card.quantity > copy_limit:
-                    print(f"Non-legendary card '{card.name}' had {deck_card.quantity} copies, capping at {copy_limit}")
+                    logger.info(f"Non-legendary card '{card.name}' had {deck_card.quantity} copies, capping at {copy_limit}")
                     deck_card.quantity = copy_limit
 
         return deck

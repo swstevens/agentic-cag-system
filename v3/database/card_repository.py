@@ -5,11 +5,15 @@ Provides high-level interface for card data access with
 two-tier lookup: cache first, then database.
 """
 
+import logging
+import os
 from typing import List, Optional
 from ..database.database_service import DatabaseService
 from ..models.deck import MTGCard, CardSearchFilters
 from ..caching import ICache, LRUCache
 from ..services.vector_service import VectorService
+
+logger = logging.getLogger(__name__)
 
 
 class CardRepository:
@@ -27,7 +31,7 @@ class CardRepository:
         database_service: DatabaseService,
         cache: Optional[ICache] = None,
         vector_service: Optional[VectorService] = None,
-        cache_size: int = 2000
+        cache_size: Optional[int] = None
     ):
         """
         Initialize card repository.
@@ -36,9 +40,14 @@ class CardRepository:
             database_service: Database service instance
             cache: Optional cache instance (creates LRUCache if None)
             vector_service: Optional vector service for semantic search
-            cache_size: Cache size if creating default cache
+            cache_size: Cache size if creating default cache (defaults to env var or 1000)
         """
         self.db = database_service
+        
+        # Use provided size, or env var, or default
+        if cache_size is None:
+            cache_size = int(os.getenv("CACHE_L2_MAX_SIZE", "1000"))
+            
         self.cache = cache or LRUCache(max_size=cache_size)
         self.vector_service = vector_service
     
@@ -138,7 +147,7 @@ class CardRepository:
             List of matching MTGCard objects
         """
         if not self.vector_service:
-            print("Warning: Vector service not initialized. Falling back to text search.")
+            logger.warning("Vector service not initialized. Falling back to text search.")
             if filters:
                 filters.text_query = query
                 return self.search(filters)
