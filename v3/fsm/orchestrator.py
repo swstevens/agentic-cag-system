@@ -5,14 +5,15 @@ Manages the finite state machine execution and coordinates
 transitions between the three primary states with iteration support.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from pydantic_graph import Graph
-from .states import ParseRequestNode, BuildInitialDeckNode, RefineDeckNode, VerifyQualityNode, StateData
+from .states import ParseRequestNode, BuildInitialDeckNode, RefineDeckNode, VerifyQualityNode, UserModificationNode, StateData
 from ..database.database_service import DatabaseService
 from ..database.card_repository import CardRepository
 from ..services.deck_builder_service import DeckBuilderService
 from ..services.quality_verifier_service import QualityVerifierService
 from ..services.vector_service import VectorService
+from ..models.deck import DeckModificationRequest, Deck
 
 
 class FSMOrchestrator:
@@ -79,16 +80,28 @@ class FSMOrchestrator:
             VerifyQualityNode
         ])
 
-    async def execute(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, request_data: Union[Dict[str, Any], DeckModificationRequest]) -> Dict[str, Any]:
         """
         Execute the FSM with the given request data.
 
+        Routes to either:
+        - New deck build flow (if dict with "message")
+        - Deck modification flow (if DeckModificationRequest)
+
         Args:
-            request_data: The incoming request data
+            request_data: Either dict for new deck OR DeckModificationRequest for modification
 
         Returns:
             Dictionary containing execution results
         """
+        # Simple routing: check request type
+        if isinstance(request_data, DeckModificationRequest):
+            return await self._execute_modification(request_data)
+        else:
+            return await self._execute_new_deck(request_data)
+
+    async def _execute_new_deck(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute new deck building flow."""
         state = StateData()
 
         # Create dependencies dict with services
@@ -109,11 +122,26 @@ class FSMOrchestrator:
 
         # Extract data from GraphRunResult.output (which is the End node data)
         result_data = graph_result.output if hasattr(graph_result, 'output') else {}
-        
+
         return {
             "success": result_data.get("success", False),
             "data": result_data if result_data.get("success") else None,
             "error": result_data.get("error"),
             "errors": state.errors,
         }
+
+    async def _execute_modification(self, mod_request: DeckModificationRequest) -> Dict[str, Any]:
+        """Execute deck modification flow."""
+        # Create modification node
+        mod_node = UserModificationNode()
+
+        # Execute modification directly (not part of FSM graph)
+        result = await mod_node.execute(
+            mod_request=mod_request,
+            agent_deck_builder=self.agent_deck_builder,
+            quality_verifier=self.quality_verifier,
+            card_repo=self.card_repo
+        )
+
+        return result
 

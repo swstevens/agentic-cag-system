@@ -189,3 +189,50 @@ class CardSearchFilters(BaseModel):
     format_legal: Optional[str] = None
     text_query: Optional[str] = None
     limit: int = Field(100, ge=1, le=1000)
+
+
+# Deck Modification Models
+
+class CardChange(BaseModel):
+    """Represents a single card change in a modification plan."""
+    action: str = Field(..., description="Action type: 'add', 'remove', or 'replace'")
+    card_name: str = Field(..., description="Name of the card")
+    quantity: int = Field(..., ge=1, description="Number of copies to add/remove")
+    reason: str = Field(..., description="Explanation for this change")
+    replacement_for: Optional[str] = Field(None, description="Card being replaced (for 'replace' actions)")
+
+
+class ModificationIntent(BaseModel):
+    """Parsed user intent for deck modification."""
+    intent_type: str = Field(..., description="Intent type: ADD, REMOVE, REPLACE, OPTIMIZE, STRATEGY_SHIFT")
+    description: str = Field(..., description="Natural language description of the intent")
+    card_changes: List[CardChange] = Field(default_factory=list, description="Specific card changes requested")
+    constraints: List[str] = Field(default_factory=list, description="Constraints (e.g., 'budget', 'keep lands')")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in intent classification (0-1)")
+
+
+class ModificationPlan(BaseModel):
+    """Execution plan for deck modifications."""
+    analysis: str = Field(..., description="Analysis of requested modifications")
+    additions: List[CardChange] = Field(default_factory=list, description="Cards to add")
+    removals: List[CardChange] = Field(default_factory=list, description="Cards to remove")
+    replacements: List[CardChange] = Field(default_factory=list, description="Cards to replace")
+    strategy_notes: str = Field(default="", description="Notes about strategic changes")
+
+
+class DeckModificationRequest(BaseModel):
+    """Request to modify an existing deck."""
+    existing_deck: Deck = Field(..., description="The deck to modify")
+    user_prompt: str = Field(..., description="User's modification request in natural language")
+    run_quality_check: bool = Field(False, description="Whether to run quality analysis after modification")
+    max_changes: int = Field(10, ge=1, le=50, description="Maximum number of changes to apply")
+    strict_validation: bool = Field(False, description="Enforce strict format rules during modification")
+
+
+class ModificationResult(BaseModel):
+    """Result of a deck modification operation."""
+    deck: Deck = Field(..., description="The modified deck")
+    changes_made: List[str] = Field(default_factory=list, description="Human-readable list of changes")
+    quality_before: Optional[float] = Field(None, description="Quality score before modification")
+    quality_after: Optional[float] = Field(None, description="Quality score after modification")
+    modification_summary: str = Field(..., description="Summary of modifications performed")

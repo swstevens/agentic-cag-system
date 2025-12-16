@@ -10,7 +10,7 @@ With iteration support for quality-driven deck refinement.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from pydantic_graph import BaseNode, End, GraphRunContext
 
 from ..models.deck import (
@@ -19,6 +19,9 @@ from ..models.deck import (
     DeckQualityMetrics,
     IterationState,
     IterationRecord,
+    DeckModificationRequest,
+    ModificationResult,
+    ModificationIntent,
 )
 from ..services.deck_builder_service import DeckBuilderService
 from ..services.quality_verifier_service import QualityVerifierService
@@ -28,11 +31,19 @@ from ..services.quality_verifier_service import QualityVerifierService
 class StateData:
     """Shared state data across FSM transitions."""
 
+    # New deck creation fields
     request: Optional[DeckBuildRequest] = None
     current_deck: Optional[Deck] = None
     iteration_state: Optional[IterationState] = None
     latest_quality: Optional[DeckQualityMetrics] = None
     errors: list[str] = field(default_factory=list)
+
+    # Deck modification fields
+    modification_request: Optional[DeckModificationRequest] = None
+    modification_intent: Optional[ModificationIntent] = None
+    modification_result: Optional[ModificationResult] = None
+    changes_made: Optional[List[str]] = None
+    quality_before: Optional[float] = None
 
 
 @dataclass
@@ -234,4 +245,76 @@ class VerifyQualityNode(BaseNode):
         except Exception as e:
             ctx.state.errors.append(f"Quality verification error: {str(e)}")
             return End({"success": False, "error": str(e)})
+
+
+class UserModificationNode:
+    """
+    Node for user-driven deck modifications.
+
+    Handles modifications to existing decks based on user prompts.
+    This is a standalone node - not part of the build FSM graph.
+    """
+
+    async def execute(
+        self,
+        mod_request: "DeckModificationRequest",
+        agent_deck_builder,
+        quality_verifier,
+        card_repo
+    ) -> Dict[str, Any]:
+        """
+        Execute user modification.
+
+        Args:
+            mod_request: The modification request
+            agent_deck_builder: Agent deck builder service
+            quality_verifier: Quality verifier service
+            card_repo: Card repository
+
+        Returns:
+            Dict with modification results
+        """
+        try:
+            deck = mod_request.existing_deck
+            user_prompt = mod_request.user_prompt
+
+            # Simple modification using agent's refine_deck method
+            # Create a minimal request object for the agent
+            from ..models.deck import DeckBuildRequest
+            temp_request = DeckBuildRequest(
+                format=deck.format,
+                colors=deck.colors,
+                archetype=deck.archetype or "Midrange",
+                quality_threshold=0.7,
+                max_iterations=1
+            )
+
+            # Use agent to refine based on user prompt
+            modified_deck = await agent_deck_builder.refine_deck(
+                deck=deck,
+                suggestions=[user_prompt],  # User prompt as suggestion
+                request=temp_request,
+                improvement_plan=None
+            )
+
+            # Optional quality check
+            quality_after = None
+            if mod_request.run_quality_check:
+                quality_metrics = await quality_verifier.verify_deck(modified_deck, deck.format)
+                quality_after = quality_metrics.overall_score
+
+            return {
+                "success": True,
+                "deck": modified_deck.model_dump(),
+                "modifications": {
+                    "summary": f"Applied modification: {user_prompt}",
+                    "quality_after": quality_after
+                }
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Modification failed: {str(e)}"
+            }
 

@@ -18,6 +18,7 @@ from ..models.deck import (
 )
 from ..models.format_rules import FormatRules
 from ..database.card_repository import CardRepository
+from .prompt_builder import PromptBuilder
 
 
 # Tool response models
@@ -73,69 +74,50 @@ class AgentDeckBuilderService:
     ):
         """
         Initialize agent deck builder.
-        
+
         Args:
             card_repository: Card repository for data access
             model_name: LLM model to use
         """
         self.card_repo = card_repository
         self.current_request = None  # Store current request for tool access
-        
-        # Create agent for initial deck building
+        self.model_name = model_name
+
+        # Agents will be created dynamically per request with format-specific prompts
+        # This allows us to use FormatRules data for accurate guidelines
+        self.build_agent = None
+        self.refine_agent = None
+
+    def _create_agents_for_format(self, format_name: str):
+        """
+        Create agents with format-specific system prompts.
+
+        Args:
+            format_name: Format to create agents for
+        """
+        # Generate dynamic prompts based on format
+        build_prompt = PromptBuilder.build_deck_builder_system_prompt(format_name)
+        refine_prompt = PromptBuilder.build_refine_agent_system_prompt(format_name)
+
+        # Create agents with format-specific prompts
         self.build_agent = Agent(
-            model_name,
+            self.model_name,
             output_type=DeckConstructionPlan,
-            system_prompt="""You are an expert Magic: The Gathering deck builder.
-
-Your goal is to construct competitive decks by intelligently selecting cards
-that work well together and fit the requested archetype.
-
-You have access to tools to search the card database. Use them strategically:
-1. Use 'semantic_query' to find cards by concept, effect, or vibe (e.g., "aggressive goblins", "removal that exiles")
-2. Use filters (colors, cmc, types) for hard constraints
-3. Look for synergies between cards
-4. Ensure proper land ratio and color distribution
-
-For each card selection, provide clear reasoning about WHY it fits the deck.
-
-Archetype guidelines:
-- Aggro: Low curve (1-3 CMC), efficient creatures, 22-24 lands
-- Midrange: Balanced curve (2-4 CMC), value cards, 24-26 lands  
-- Control: Higher curve (2-5 CMC), removal/counters, 26-28 lands
-- Combo: Focused on combo pieces, tutors, protection, 22-25 lands
-"""
+            system_prompt=build_prompt
         )
-        
-        # Create agent for deck refinement
+
         self.refine_agent = Agent(
-            model_name,
+            self.model_name,
             output_type=RefinementPlan,
-            system_prompt="""You are an expert Magic: The Gathering deck optimizer.
-
-Your goal is to improve existing decks by identifying weaknesses and
-making targeted improvements.
-
-Analyze the current deck and improvement suggestions, then decide:
-1. Which cards to remove (and why they're weak)
-2. Which cards to add (and why they're better)
-3. How to improve mana curve, synergy, or consistency
-
-IMPORTANT RULES:
-- LEGENDARY RULE: Legendary cards (marked with is_legendary: true) can only have 1 copy on the battlefield at a time
-  - Typically include 2-3 copies in the deck for consistency/redundancy
-  - Never recommend more than 3 copies of any legendary card
-- Non-legendary cards: Use 3-4 copies for consistency, avoid excessive 1-ofs unless situational
-
-Be specific and strategic. Focus on high-impact changes.
-"""
+            system_prompt=refine_prompt
         )
-        
-        # Register tools
+
+        # Register tools for both agents
         self._register_tools()
-    
+
     def _register_tools(self):
         """Register tools for the agents to use."""
-        
+
         @self.build_agent.tool
         async def search_cards(
             ctx: RunContext,
@@ -238,43 +220,47 @@ Be specific and strategic. Focus on high-impact changes.
     async def build_initial_deck(self, request: DeckBuildRequest) -> Deck:
         """
         Build initial deck using LLM reasoning.
-        
+
         Args:
             request: Deck build request
-            
+
         Returns:
             Initial deck
         """
+        # Create agents with format-specific prompts
+        self._create_agents_for_format(request.format)
+
+        # Get format-specific land count
+        land_count = FormatRules.get_land_count(request.format, request.archetype)
+
         prompt = f"""Build a {request.archetype} deck for {request.format}.
 
 Colors: {', '.join(request.colors)}
 Strategy: {request.strategy}
 
-IMPORTANT: 
+IMPORTANT:
 - You only need to select SPELL cards (creatures, instants, sorceries, etc.)
-- Lands will be added automatically (22 for aggro, 24 for midrange, 26 for control)
-- Focus on CONSISTENCY: Use 3-4 copies of your best cards
-- LEGENDARY RULE: Legendary cards (marked with is_legendary: true) should use 2-3 copies max
-- Avoid 1-ofs unless the card is legendary or highly situational
+- Lands will be added automatically ({land_count} lands based on {request.archetype} archetype)
+- Focus on building a spell suite that fits the format and archetype guidelines
 
-Use the search_cards tool to find appropriate cards. 
+Use the search_cards tool to find appropriate cards.
 - Use semantic_query for high-level concepts (e.g. "synergistic goblin cards", "cheap removal")
 - Use standard filters for specific constraints
 
 Build a focused, consistent spell suite with clear synergies.
 """
-        
+
         try:
             # Store request for tool access
             self.current_request = request
-            
+
             result = await self.build_agent.run(prompt)
             plan: DeckConstructionPlan = result.output
-            
+
             # Execute the plan
             deck = await self._execute_construction_plan(plan, request)
             return deck
-            
+
         except Exception as e:
             print(f"Agent deck building failed: {e}")
             # Fallback to simple construction
@@ -291,22 +277,26 @@ Build a focused, consistent spell suite with clear synergies.
     ) -> Deck:
         """
         Refine deck using LLM reasoning.
-        
+
         Args:
             deck: Current deck
             suggestions: Improvement suggestions
             request: Original build request
             improvement_plan: Optional improvement plan from quality verifier
-            
+
         Returns:
             Refined deck
         """
+        # Ensure agents are created for this format (might be different call chain)
+        if self.refine_agent is None:
+            self._create_agents_for_format(request.format)
+
         # Format current deck
         deck_list = [
             f"{dc.quantity}x {dc.card.name} (CMC: {dc.card.cmc}, {dc.card.type_line})"
             for dc in deck.cards
         ]
-        
+
         prompt = f"""Refine this {request.archetype} deck:
 
 Current deck:
@@ -316,7 +306,7 @@ Suggestions:
 {chr(10).join(suggestions)}
 
 """
-        
+
         if improvement_plan:
             prompt += f"\nImprovement plan from quality analysis:\n"
             prompt += f"Analysis: {improvement_plan.analysis}\n"
@@ -325,27 +315,25 @@ Suggestions:
             for addition in improvement_plan.additions:
                 prompt += f"- Add {addition.quantity}x {addition.card_name}: {addition.reason}\n"
 
-        target_size = request.deck_size if request.deck_size > 0 else 60
+        target_size = FormatRules.get_deck_size(request.format)
         prompt += f"\nIMPORTANT CONSTRAINTS:"
         prompt += f"\n- Current deck size is {deck.total_cards}. Target size is {target_size}."
         prompt += "\n- If current < target, you MUST add more cards than you remove."
         prompt += "\n- If current > target, you MUST remove more cards than you add."
         prompt += "\n- If current == target, you MUST add and remove equal amounts."
-        prompt += "\n- For legendary cards (marked with is_legendary: true in search results): max 2-3 copies"
-        prompt += "\n- For non-legendary cards: prefer 3-4 copies for consistency"
         prompt += "\nUse search_cards_refine to find better cards (use semantic_query for best results). Provide a refinement plan."
-        
+
         try:
             # Store request for tool access
             self.current_request = request
-            
+
             result = await self.refine_agent.run(prompt)
             plan: RefinementPlan = result.output
-            
+
             # Execute the refinement plan
             deck = await self._execute_refinement_plan(deck, plan, request)
             return deck
-            
+
         except Exception as e:
             print(f"Agent deck refinement failed: {e}")
             # Fallback to simple refinement

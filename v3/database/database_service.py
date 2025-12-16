@@ -59,7 +59,7 @@ class DatabaseService:
         """Initialize database schema if not exists."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Create cards table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS cards (
@@ -82,23 +82,57 @@ class DatabaseService:
                     keywords TEXT
                 )
             """)
-            
+
+            # Create decks table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS decks (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    format TEXT NOT NULL,
+                    archetype TEXT,
+                    colors TEXT,
+                    deck_data TEXT NOT NULL,
+                    quality_score REAL,
+                    total_cards INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    user_id TEXT
+                )
+            """)
+
             # Create indexes for common queries
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_name 
+                CREATE INDEX IF NOT EXISTS idx_name
                 ON cards(name)
             """)
-            
+
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_cmc 
+                CREATE INDEX IF NOT EXISTS idx_cmc
                 ON cards(cmc)
             """)
-            
+
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_rarity 
+                CREATE INDEX IF NOT EXISTS idx_rarity
                 ON cards(rarity)
             """)
-            
+
+            # Create indexes for deck queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_deck_format
+                ON decks(format)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_deck_archetype
+                ON decks(archetype)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_deck_created_at
+                ON decks(created_at)
+            """)
+
             conn.commit()
     
     def insert_card(self, card_data: Dict[str, Any]) -> None:

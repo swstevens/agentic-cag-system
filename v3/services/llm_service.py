@@ -9,6 +9,7 @@ import os
 from typing import Optional, List
 from pydantic_ai import Agent
 from ..models.deck import Deck, DeckImprovementPlan, CardRemoval, CardSuggestion
+from .prompt_builder import PromptBuilder
 
 
 class LLMService:
@@ -22,45 +23,46 @@ class LLMService:
     def __init__(self, model_name: str = "openai:gpt-4o", api_key: Optional[str] = None):
         """
         Initialize LLM service.
-        
+
         Args:
             model_name: Model to use (default: gpt-4o)
             api_key: Optional API key (defaults to env var)
         """
         if api_key:
             os.environ['OPENAI_API_KEY'] = api_key
-            
-        self.agent = Agent(
-            model_name,
-            output_type=DeckImprovementPlan,
-            system_prompt="""You are an expert Magic: The Gathering deck builder.
-            
-            Your goal is to analyze a given deck and provide a concrete improvement plan.
-            You must identify weak cards to remove and suggest better replacements.
-            
-            Focus on:
-            1. Mana curve optimization
-            2. Synergy and consistency
-            3. Win conditions (finishers)
-            4. Interaction/Removal
-            
-            For each removal, explain WHY it is weak or doesn't fit.
-            For each addition, explain WHY it improves the deck.
-            
-            Be specific with card names.
-            """
-        )
+
+        self.model_name = model_name
+        # Agent will be created dynamically per format
+        self.agent = None
     
+    def _create_agent_for_format(self, format_name: str):
+        """
+        Create agent with format-specific system prompt.
+
+        Args:
+            format_name: Format to create agent for
+        """
+        system_prompt = PromptBuilder.build_llm_analyzer_system_prompt(format_name)
+
+        self.agent = Agent(
+            self.model_name,
+            output_type=DeckImprovementPlan,
+            system_prompt=system_prompt
+        )
+
     async def analyze_deck(self, deck: Deck) -> DeckImprovementPlan:
         """
         Analyze deck and generate improvement plan.
-        
+
         Args:
             deck: Deck to analyze
-            
+
         Returns:
             Structured improvement plan
         """
+        # Create agent with format-specific prompt
+        self._create_agent_for_format(deck.format)
+
         # Format deck list for the prompt
         deck_list = []
         for deck_card in deck.cards:
@@ -70,19 +72,19 @@ class LLMService:
                 f"(CMC: {card.cmc}, Type: {card.type_line}, "
                 f"Colors: {card.colors})"
             )
-            
+
         prompt = f"""
         Analyze this {deck.format} {deck.archetype} deck:
-        
+
         Colors: {', '.join(deck.colors)}
-        
+
         Decklist:
         {chr(10).join(deck_list)}
-        
+
         Provide a plan to improve this deck's competitiveness.
         Identify at least 2-3 cards to remove and replacements to add.
         """
-        
+
         try:
             result = await self.agent.run(prompt)
             return result.output
