@@ -27,6 +27,42 @@ def deck_list_component(deck: dict | None) -> FT:
             cls="deck-list-container"
         )
     
+    # Build deck info header
+    deck_info = Div(
+        H2("Deck List", cls="deck-header"),
+        Div(
+            Span(f"{deck['total_cards']} cards", cls="deck-stat"),
+            Span(f"{deck['format']}", cls="deck-stat"),
+            Span(f"{deck.get('archetype', 'Unknown')}", cls="deck-stat"),
+            cls="deck-info"
+        ),
+        cls="deck-header-section"
+    )
+    
+    return Div(
+        deck_info,
+        render_card_groups(deck),
+        id="deck-list",
+        cls="deck-list-container"
+    )
+
+
+def render_card_groups(deck: dict) -> FT:
+    """
+    Render just the grouped list of cards for a deck.
+    
+    Args:
+        deck: Deck dictionary with 'cards' list
+        
+    Returns:
+        FastHTML component (Div containing card groups)
+    """
+    if not deck or not deck.get("cards"):
+        return Div(
+            P("No cards in this deck.", cls="empty-state"),
+            cls="deck-empty"
+        )
+
     # Group cards by type
     grouped_cards = {}
     for deck_card in deck["cards"]:
@@ -58,18 +94,6 @@ def deck_list_component(deck: dict | None) -> FT:
     # Sort groups in preferred order
     type_order = ["Creatures", "Planeswalkers", "Instants", "Sorceries", "Enchantments", "Artifacts", "Lands", "Other"]
     sorted_groups = [(t, grouped_cards[t]) for t in type_order if t in grouped_cards]
-    
-    # Build deck info header
-    deck_info = Div(
-        H2("Deck List", cls="deck-header"),
-        Div(
-            Span(f"{deck['total_cards']} cards", cls="deck-stat"),
-            Span(f"{deck['format']}", cls="deck-stat"),
-            Span(f"{deck.get('archetype', 'Unknown')}", cls="deck-stat"),
-            cls="deck-info"
-        ),
-        cls="deck-header-section"
-    )
     
     # Build card groups
     card_groups = []
@@ -103,9 +127,4 @@ def deck_list_component(deck: dict | None) -> FT:
             )
         )
     
-    return Div(
-        deck_info,
-        Div(*card_groups, cls="deck-cards"),
-        id="deck-list",
-        cls="deck-list-container"
-    )
+    return Div(*card_groups, cls="deck-cards")

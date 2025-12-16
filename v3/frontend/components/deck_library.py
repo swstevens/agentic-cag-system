@@ -3,11 +3,12 @@ Deck library component for displaying saved decks.
 """
 
 from fasthtml.common import *
+from components.deck_list import deck_list_component
 
 
-def deck_card_item(deck: dict) -> FT:
+def deck_list_item(deck: dict) -> FT:
     """
-    Render a single deck card in the library grid.
+    Render a single deck item in the library list.
 
     Args:
         deck: Deck metadata dictionary
@@ -25,45 +26,63 @@ def deck_card_item(deck: dict) -> FT:
     quality_score = deck.get("quality_score")
     quality_display = f"{quality_score:.0%}" if quality_score else "N/A"
 
-    # Format date
-    created_at = deck.get("created_at", "")
-    if created_at and "T" in created_at:
-        created_at = created_at.split("T")[0]
-
-    return Div(
-        Div(
-            H3(deck["name"], cls="deck-card-title"),
-            P(deck.get("description", "No description"), cls="deck-card-description"),
+    return Details(
+        Summary(
             Div(
-                Span(f"{deck['format']}", cls="deck-badge"),
-                Span(f"{deck.get('archetype', 'Unknown')}", cls="deck-badge"),
-                *color_badges,
-                cls="deck-badges"
-            ),
-            Div(
-                Span(f"{deck['total_cards']} cards", cls="deck-stat-item"),
-                Span(f"Quality: {quality_display}", cls="deck-stat-item"),
-                cls="deck-stats"
-            ),
-            Div(
-                A(
-                    "✏️ Edit",
-                    href=f"/deck/{deck['id']}",
-                    cls="btn btn-sm btn-primary"
+                Div(
+                    H3(deck["name"], cls="deck-bar-title"),
+                    Span(f"{deck['total_cards']} cards • {quality_display} Quality", cls="deck-bar-meta"),
+                    cls="deck-bar-main"
                 ),
-                Button(
-                    "🗑️ Delete",
-                    hx_delete=f"/deck/{deck['id']}",
-                    hx_confirm="Are you sure you want to delete this deck?",
-                    hx_target="#main-content",
-                    hx_swap="outerHTML",
-                    cls="btn btn-sm btn-danger"
+                Div(
+                    Div(
+                        Span(f"{deck['format']}", cls="deck-badge"),
+                        Span(f"{deck.get('archetype', 'Unknown')}", cls="deck-badge"),
+                        *color_badges,
+                        cls="deck-bar-badges"
+                    ),
+                    Div(
+                        A(
+                            "✏️",
+                            href=f"/deck/{deck['id']}",
+                            cls="btn-icon",
+                            title="Edit Deck"
+                        ),
+                        Button(
+                            "🗑️",
+                            hx_delete=f"/deck/{deck['id']}",
+                            hx_confirm="Are you sure you want to delete this deck?",
+                            hx_target="#main-content",
+                            hx_select="#main-content",
+                            hx_swap="outerHTML",
+                            cls="btn-icon btn-icon-danger",
+                            title="Delete Deck"
+                        ),
+                        cls="deck-bar-actions"
+                    ),
+                    Span("▶", cls="deck-arrow-icon"),
+                    cls="deck-bar-right"
                 ),
-                cls="deck-card-actions"
+                cls="deck-bar-content"
             ),
-            cls="deck-card-content"
+            cls="deck-bar-summary",
+            hx_get=f"/deck/{deck['id']}/snippet",
+            hx_target=f"#deck-content-{deck['id']}",
+            hx_trigger="click once"
         ),
-        cls="deck-card"
+        Div(
+            Div(
+                P(deck.get("description", "No description"), cls="deck-description-full"),
+                cls="deck-details-header"
+            ),
+            Div(
+                P("Loading cards...", cls="loading-text"),
+                id=f"deck-content-{deck['id']}",
+                cls="deck-card-list-container"
+            ),
+            cls="deck-expanded-content"
+        ),
+        cls="deck-bar-item"
     )
 
 
@@ -116,18 +135,19 @@ def deck_library_component(decks: list, format_filter: str = None, archetype_fil
         ),
         hx_get="/decks",
         hx_target="#main-content",
+        hx_select="#main-content",
         hx_swap="outerHTML",
         cls="library-filters"
     )
 
-    # Deck grid
+    # Deck list
     if decks:
-        deck_grid = Div(
-            *[deck_card_item(deck) for deck in decks],
-            cls="deck-grid"
+        deck_list = Div(
+            *[deck_list_item(deck) for deck in decks],
+            cls="deck-library-list"
         )
     else:
-        deck_grid = Div(
+        deck_list = Div(
             P("No saved decks found.", cls="empty-state"),
             P("Build a deck in the chat and save it to see it here!", cls="empty-state-hint"),
             A("Start Building →", href="/", cls="btn btn-primary"),
@@ -137,7 +157,7 @@ def deck_library_component(decks: list, format_filter: str = None, archetype_fil
     return Div(
         header,
         filters,
-        deck_grid,
+        deck_list,
         id="deck-library",
         cls="deck-library-container"
     )

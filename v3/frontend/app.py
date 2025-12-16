@@ -68,6 +68,8 @@ def get_session_state(session):
 @rt("/")
 def get(session):
     """Render the main page."""
+    # Reset session on full page load
+    session.clear()
     get_session_state(session)
     return Title("MTG Deck Builder"), Main(
         render_content(session)
@@ -94,6 +96,7 @@ async def post(message: str, session):
             ]
         }
         session["deck"] = mock_deck
+        session["deck_id"] = None  # Reset deck_id for new mock deck
         session["messages"].append({"role": "assistant", "content": "Debug: Loaded mock deck."})
         print(f"DEBUG: Session deck updated: {session['deck']}")
         return render_content(session)
@@ -194,6 +197,12 @@ async def get(session, format: str = "", archetype: str = ""):
         )
 
 
+@rt("/deck/close-modal")
+def get():
+    """Close the modal."""
+    return Div(id="modal")
+
+
 @rt("/deck/{deck_id}")
 async def get(deck_id: str, session):
     """Load a specific deck for editing."""
@@ -229,6 +238,28 @@ async def get(deck_id: str, session):
         )
         return Title("MTG Deck Builder"), Main(
             render_content(session)
+        )
+
+@rt("/deck/{deck_id}/snippet")
+async def get(deck_id: str, session):
+    """Load the card list snippet for lazy loading."""
+    get_session_state(session)
+    
+    try:
+        # Fetch deck from backend
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{BACKEND_URL}/api/decks/{deck_id}")
+            response.raise_for_status()
+            data = response.json()
+        
+        from components.deck_list import render_card_groups
+        return render_card_groups(data["deck"])
+
+    except Exception as e:
+        print(f"Error loading snippet for {deck_id}: {e}")
+        return Div(
+            P(f"Failed to load cards: {str(e)}", cls="error-message"),
+            cls="deck-expanded-content"
         )
 
 
@@ -307,10 +338,7 @@ def get(session):
     return modal_content
 
 
-@rt("/deck/close-modal")
-def get():
-    """Close the modal."""
-    return Div(id="modal")
+
 
 
 @rt("/deck/save")

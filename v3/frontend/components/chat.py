@@ -74,6 +74,7 @@ def chat_component(messages: list, has_deck: bool = False, deck_id: str = None) 
         ),
         hx_post="/chat",
         hx_target="#main-content",
+        hx_select="#main-content",
         hx_swap="outerHTML",
         cls="chat-form"
     )
@@ -88,6 +89,7 @@ def chat_component(messages: list, has_deck: bool = False, deck_id: str = None) 
                     "💾 Save Changes",
                     hx_post="/deck/update",
                     hx_target="#main-content",
+                    hx_select="#main-content",
                     hx_swap="outerHTML",
                     cls="btn btn-primary"
                 ),
