@@ -8,6 +8,7 @@ import asyncio
 import httpx
 import os
 from pathlib import Path
+import uuid
 from fasthtml.common import *
 from dotenv import load_dotenv
 
@@ -88,8 +89,8 @@ async def post(message: str, session):
             "archetype": "Red Deck Wins",
             "total_cards": 4,
             "cards": [
-                {"card": {"name": "Mountain", "types": ["Land"], "mana_cost": ""}, "quantity": 2},
-                {"card": {"name": "Lightning Bolt", "types": ["Instant"], "mana_cost": "{R}", "cmc": 1}, "quantity": 2}
+                {"card": {"id": str(uuid.uuid4()), "name": "Mountain", "types": ["Land"], "type_line": "Basic Land — Mountain", "mana_cost": ""}, "quantity": 2},
+                {"card": {"id": str(uuid.uuid4()), "name": "Lightning Bolt", "types": ["Instant"], "type_line": "Instant", "mana_cost": "{R}", "cmc": 1}, "quantity": 2}
             ]
         }
         session["deck"] = mock_deck
