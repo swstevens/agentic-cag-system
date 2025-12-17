@@ -1,5 +1,11 @@
 # Class Diagram
 
+This document provides a comprehensive class diagram of the v3 architecture, broken down into four logical sections for better readability and understanding.
+
+## Part 1: API & FSM Orchestration
+
+This diagram shows the frontend API layer and the FSM (Finite State Machine) orchestration that controls the workflow.
+
 ```mermaid
 classDiagram
     %% ============================================
@@ -132,6 +138,68 @@ classDiagram
     }
 
     %% ============================================
+    %% Relationships
+    %% ============================================
+
+    %% API to FSM
+    FastAPI --> FSMOrchestrator : uses
+    FastAPI ..> ChatRequest : receives
+    FastAPI ..> ChatResponse : returns
+    FastAPI ..> SaveDeckRequest : receives
+    FastAPI ..> SaveDeckResponse : returns
+    FastAPI ..> DeckListResponse : returns
+    FastAPI ..> DeckListItem : uses
+    FastAPI ..> UpdateDeckRequest : receives
+    FastAPI ..> UpdateDeckResponse : returns
+    FastAPI ..> DeleteDeckResponse : returns
+
+    %% FSM Orchestration
+    FSMOrchestrator --> ParseRequestNode : creates
+    FSMOrchestrator --> BuildInitialDeckNode : creates
+    FSMOrchestrator --> RefineDeckNode : creates
+    FSMOrchestrator --> VerifyQualityNode : creates
+    FSMOrchestrator --> UserModificationNode : creates
+    FSMOrchestrator ..> StateData : manages
+
+    %% FSM State Transitions
+    ParseRequestNode --> BuildInitialDeckNode : transitions to
+    BuildInitialDeckNode --> VerifyQualityNode : transitions to
+    VerifyQualityNode --> RefineDeckNode : iterates via
+    RefineDeckNode --> VerifyQualityNode : transitions to
+
+    %% Styling
+    classDef apiStyle fill:#e1f5ff
+    classDef fsmStyle fill:#fff4e1
+    
+    class FastAPI:::apiStyle
+    class ChatRequest:::apiStyle
+    class ChatResponse:::apiStyle
+    class SaveDeckRequest:::apiStyle
+    class SaveDeckResponse:::apiStyle
+    class DeckListItem:::apiStyle
+    class DeckListResponse:::apiStyle
+    class UpdateDeckRequest:::apiStyle
+    class UpdateDeckResponse:::apiStyle
+    class DeleteDeckResponse:::apiStyle
+    
+    class FSMOrchestrator:::fsmStyle
+    class StateData:::fsmStyle
+    class ParseRequestNode:::fsmStyle
+    class BuildInitialDeckNode:::fsmStyle
+    class RefineDeckNode:::fsmStyle
+    class VerifyQualityNode:::fsmStyle
+    class UserModificationNode:::fsmStyle
+```
+
+---
+
+## Part 2: Service Layer
+
+This diagram shows the business logic services that power deck building, quality verification, and AI interactions.
+
+```mermaid
+classDiagram
+    %% ============================================
     %% Services Layer
     %% ============================================
     class AgentDeckBuilderService {
@@ -190,6 +258,97 @@ classDiagram
         +build_llm_analyzer_system_prompt(format) str
     }
 
+    %% Lightweight references to other layers
+    class FSMOrchestrator {
+        <<External>>
+    }
+    
+    class CardRepository {
+        <<External>>
+    }
+    
+    class LRUCache {
+        <<External>>
+    }
+
+    class DeckImprovementPlan {
+        <<External>>
+    }
+
+    class DeckQualityMetrics {
+        <<External>>
+    }
+
+    class FormatRules {
+        <<External>>
+    }
+
+    class DeckConstructionPlan {
+        <<External>>
+    }
+
+    class RefinementPlan {
+        <<External>>
+    }
+
+    %% ============================================
+    %% Relationships
+    %% ============================================
+
+    %% FSM uses services
+    FSMOrchestrator --> AgentDeckBuilderService : owns
+    FSMOrchestrator --> LLMService : owns
+    FSMOrchestrator --> QualityVerifierService : owns
+    FSMOrchestrator --> DeckBuilderService : owns
+    FSMOrchestrator --> VectorService : owns
+
+    %% Service dependencies
+    AgentDeckBuilderService --> CardRepository : uses
+    AgentDeckBuilderService ..> PromptBuilder : uses
+    AgentDeckBuilderService ..> FormatRules : consults
+    AgentDeckBuilderService ..> DeckConstructionPlan : produces
+    AgentDeckBuilderService ..> RefinementPlan : produces
+
+    LLMService ..> PromptBuilder : uses
+    LLMService ..> DeckImprovementPlan : produces
+
+    QualityVerifierService --> LLMService : uses
+    QualityVerifierService ..> FormatRules : consults
+    QualityVerifierService ..> DeckQualityMetrics : produces
+
+    DeckBuilderService --> CardRepository : uses
+
+    VectorService --> LRUCache : uses
+
+    %% Styling
+    classDef serviceStyle fill:#e8f5e9
+    classDef externalStyle fill:#f5f5f5,stroke-dasharray: 5 5
+    
+    class AgentDeckBuilderService:::serviceStyle
+    class LLMService:::serviceStyle
+    class QualityVerifierService:::serviceStyle
+    class DeckBuilderService:::serviceStyle
+    class VectorService:::serviceStyle
+    class PromptBuilder:::serviceStyle
+    
+    class FSMOrchestrator:::externalStyle
+    class CardRepository:::externalStyle
+    class LRUCache:::externalStyle
+    class DeckImprovementPlan:::externalStyle
+    class DeckQualityMetrics:::externalStyle
+    class FormatRules:::externalStyle
+    class DeckConstructionPlan:::externalStyle
+    class RefinementPlan:::externalStyle
+```
+
+---
+
+## Part 3: Data Access & Caching
+
+This diagram shows the data persistence layer including repositories, database services, and caching infrastructure.
+
+```mermaid
+classDiagram
     %% ============================================
     %% Data Access Layer
     %% ============================================
@@ -263,8 +422,91 @@ classDiagram
         +float hit_rate
     }
 
+    %% Lightweight references to other layers
+    class FastAPI {
+        <<External>>
+    }
+
+    class FSMOrchestrator {
+        <<External>>
+    }
+
+    class VectorService {
+        <<External>>
+    }
+
+    class MTGCard {
+        <<External>>
+    }
+
+    class Deck {
+        <<External>>
+    }
+
+    class CardSearchFilters {
+        <<External>>
+    }
+
     %% ============================================
-    %% Models Layer
+    %% Relationships
+    %% ============================================
+
+    %% API uses repositories
+    FastAPI --> DeckRepository : uses
+
+    %% FSM uses repositories
+    FSMOrchestrator --> DatabaseService : owns
+    FSMOrchestrator --> CardRepository : owns
+
+    %% Repository dependencies
+    CardRepository --> DatabaseService : uses
+    CardRepository --> ICache : uses
+    CardRepository --> VectorService : uses
+    CardRepository ..> CardSearchFilters : accepts
+    CardRepository ..> MTGCard : returns
+
+    DeckRepository --> DatabaseService : uses
+    DeckRepository ..> Deck : stores/retrieves
+
+    DatabaseService ..> MTGCard : stores/retrieves
+    DatabaseService ..> Deck : stores/retrieves
+
+    %% Caching
+    LRUCache ..|> ICache : implements
+    ICache ..> CacheStats : returns
+    VectorService --> LRUCache : uses
+
+    %% Styling
+    classDef dataAccessStyle fill:#f3e5f5
+    classDef cacheStyle fill:#fce4ec
+    classDef externalStyle fill:#f5f5f5,stroke-dasharray: 5 5
+    
+    class CardRepository:::dataAccessStyle
+    class DeckRepository:::dataAccessStyle
+    class DatabaseService:::dataAccessStyle
+    
+    class ICache:::cacheStyle
+    class LRUCache:::cacheStyle
+    class CacheStats:::cacheStyle
+    
+    class FastAPI:::externalStyle
+    class FSMOrchestrator:::externalStyle
+    class VectorService:::externalStyle
+    class MTGCard:::externalStyle
+    class Deck:::externalStyle
+    class CardSearchFilters:::externalStyle
+```
+
+---
+
+## Part 4: Domain Models
+
+This diagram shows all the domain models (data structures) and their relationships.
+
+```mermaid
+classDiagram
+    %% ============================================
+    %% Core Domain Models
     %% ============================================
     class MTGCard {
         +str id
@@ -279,11 +521,9 @@ classDiagram
         +str oracle_text
         +str power
         +str toughness
-        +str loyalty
-        +str set_code
-        +str rarity
-        +dict legalities
         +list keywords
+        +dict legalities
+        +float price_usd
     }
 
     class DeckCard {
@@ -314,6 +554,9 @@ classDiagram
         +int deck_size
     }
 
+    %% ============================================
+    %% Quality & Improvement Models
+    %% ============================================
     class DeckQualityMetrics {
         +float mana_curve_score
         +float land_ratio_score
@@ -344,6 +587,9 @@ classDiagram
         +int quantity
     }
 
+    %% ============================================
+    %% Iteration & State Models
+    %% ============================================
     class IterationState {
         +int iteration_count
         +int max_iterations
@@ -361,6 +607,20 @@ classDiagram
         +datetime timestamp
     }
 
+    class StateData {
+        +DeckBuildRequest request
+        +Deck current_deck
+        +IterationState iteration_state
+        +DeckQualityMetrics latest_quality
+        +list errors
+        +DeckModificationRequest modification_request
+        +ModificationIntent modification_intent
+        +ModificationResult modification_result
+    }
+
+    %% ============================================
+    %% Modification Models
+    %% ============================================
     class DeckModificationRequest {
         +Deck existing_deck
         +str user_prompt
@@ -401,6 +661,9 @@ classDiagram
         +str replacement_for
     }
 
+    %% ============================================
+    %% Search & Rules Models
+    %% ============================================
     class CardSearchFilters {
         +list colors
         +list types
@@ -428,6 +691,9 @@ classDiagram
         +get_mana_curve_standards(format) dict
     }
 
+    %% ============================================
+    %% Agent Planning Models
+    %% ============================================
     class DeckConstructionPlan {
         +str strategy
         +list card_selections
@@ -455,93 +721,21 @@ classDiagram
     %% Relationships
     %% ============================================
 
-    %% API Layer
-    FastAPI --> FSMOrchestrator : uses
-    FastAPI --> DeckRepository : uses
-    FastAPI ..> ChatRequest : receives
-    FastAPI ..> ChatResponse : returns
-    FastAPI ..> SaveDeckRequest : receives
-    FastAPI ..> SaveDeckResponse : returns
-    FastAPI ..> DeckListResponse : returns
-    FastAPI ..> DeckListItem : uses
-    FastAPI ..> UpdateDeckRequest : receives
-    FastAPI ..> UpdateDeckResponse : returns
-    FastAPI ..> DeleteDeckResponse : returns
-
-    %% FSM Orchestration
-    FSMOrchestrator --> DatabaseService : owns
-    FSMOrchestrator --> VectorService : owns
-    FSMOrchestrator --> CardRepository : owns
-    FSMOrchestrator --> DeckBuilderService : owns
-    FSMOrchestrator --> LLMService : owns
-    FSMOrchestrator --> QualityVerifierService : owns
-    FSMOrchestrator --> AgentDeckBuilderService : owns
-    FSMOrchestrator --> ParseRequestNode : creates
-    FSMOrchestrator --> BuildInitialDeckNode : creates
-    FSMOrchestrator --> RefineDeckNode : creates
-    FSMOrchestrator --> VerifyQualityNode : creates
-    FSMOrchestrator --> UserModificationNode : creates
-    FSMOrchestrator ..> StateData : manages
-
-    %% FSM State Transitions
-    ParseRequestNode --> BuildInitialDeckNode : transitions to
-    BuildInitialDeckNode --> VerifyQualityNode : transitions to
-    VerifyQualityNode --> RefineDeckNode : iterates via
-    RefineDeckNode --> VerifyQualityNode : transitions to
-
-    ParseRequestNode ..> DeckBuildRequest : parses
-    BuildInitialDeckNode ..> AgentDeckBuilderService : uses
-    RefineDeckNode ..> AgentDeckBuilderService : uses
-    VerifyQualityNode ..> QualityVerifierService : uses
-    UserModificationNode ..> AgentDeckBuilderService : uses
-
-    %% Services Dependencies
-    AgentDeckBuilderService --> CardRepository : uses
-    AgentDeckBuilderService ..> FormatRules : consults
-    AgentDeckBuilderService ..> PromptBuilder : uses
-    AgentDeckBuilderService ..> DeckConstructionPlan : produces
-    AgentDeckBuilderService ..> RefinementPlan : produces
-
-    LLMService ..> DeckImprovementPlan : produces
-    LLMService ..> PromptBuilder : uses
-
-    QualityVerifierService --> LLMService : uses
-    QualityVerifierService ..> FormatRules : consults
-    QualityVerifierService ..> DeckQualityMetrics : produces
-
-    DeckBuilderService --> CardRepository : uses
-
-    VectorService --> LRUCache : uses
-
-    %% Data Access
-    CardRepository --> DatabaseService : uses
-    CardRepository --> ICache : uses
-    CardRepository --> VectorService : uses
-    CardRepository ..> CardSearchFilters : accepts
-    CardRepository ..> MTGCard : returns
-
-    DeckRepository --> DatabaseService : uses
-    DeckRepository ..> Deck : stores/retrieves
-
-    DatabaseService ..> MTGCard : stores/retrieves
-    DatabaseService ..> Deck : stores/retrieves
-
-    %% Caching
-    LRUCache ..|> ICache : implements
-    ICache ..> CacheStats : returns
-
-    %% Model Relationships
+    %% Core deck composition
     Deck *-- DeckCard : contains
     DeckCard *-- MTGCard : wraps
 
+    %% Quality metrics
     DeckQualityMetrics *-- DeckImprovementPlan : contains
     DeckImprovementPlan *-- CardRemoval : contains
     DeckImprovementPlan *-- CardSuggestion : contains
 
+    %% Iteration tracking
     IterationState *-- IterationRecord : contains
     IterationRecord *-- Deck : snapshots
     IterationRecord *-- DeckQualityMetrics : tracks
 
+    %% State management
     StateData *-- DeckBuildRequest : contains
     StateData *-- Deck : tracks
     StateData *-- IterationState : manages
@@ -550,18 +744,38 @@ classDiagram
     StateData *-- ModificationIntent : contains
     StateData *-- ModificationResult : contains
 
+    %% Modification workflow
     DeckModificationRequest *-- Deck : modifies
     ModificationPlan *-- CardChange : contains
     ModificationResult *-- Deck : produces
 
+    %% Agent planning
     DeckConstructionPlan *-- CardSelection : contains
     RefinementPlan *-- RefinementAction : contains
 
     %% Styling
-    class FastAPI,ChatRequest,ChatResponse,SaveDeckRequest,SaveDeckResponse,DeckListItem,DeckListResponse,UpdateDeckRequest,UpdateDeckResponse,DeleteDeckResponse fill:#e1f5ff
-    class FSMOrchestrator,StateData,ParseRequestNode,BuildInitialDeckNode,RefineDeckNode,VerifyQualityNode,UserModificationNode fill:#fff4e1
-    class AgentDeckBuilderService,LLMService,QualityVerifierService,DeckBuilderService,VectorService,PromptBuilder fill:#e8f5e9
-    class CardRepository,DeckRepository,DatabaseService fill:#f3e5f5
-    class ICache,LRUCache,CacheStats fill:#fce4ec
-    class MTGCard,DeckCard,Deck,DeckBuildRequest,DeckQualityMetrics,DeckImprovementPlan,CardRemoval,CardSuggestion,IterationState,IterationRecord,DeckModificationRequest,ModificationIntent,ModificationPlan,ModificationResult,CardChange,CardSearchFilters,FormatRules,DeckConstructionPlan,CardSelection,RefinementPlan,RefinementAction fill:#fff9c4
+    classDef modelStyle fill:#fff9c4
+    
+    class MTGCard:::modelStyle
+    class DeckCard:::modelStyle
+    class Deck:::modelStyle
+    class DeckBuildRequest:::modelStyle
+    class DeckQualityMetrics:::modelStyle
+    class DeckImprovementPlan:::modelStyle
+    class CardRemoval:::modelStyle
+    class CardSuggestion:::modelStyle
+    class IterationState:::modelStyle
+    class IterationRecord:::modelStyle
+    class DeckModificationRequest:::modelStyle
+    class ModificationIntent:::modelStyle
+    class ModificationPlan:::modelStyle
+    class ModificationResult:::modelStyle
+    class CardChange:::modelStyle
+    class CardSearchFilters:::modelStyle
+    class FormatRules:::modelStyle
+    class DeckConstructionPlan:::modelStyle
+    class CardSelection:::modelStyle
+    class RefinementPlan:::modelStyle
+    class RefinementAction:::modelStyle
+    class StateData:::modelStyle
 ```
