@@ -1,4 +1,4 @@
-# V3 Architecture - Backend Class Diagram
+# Class Diagram
 
 ```mermaid
 classDiagram

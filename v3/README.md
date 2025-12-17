@@ -3,6 +3,12 @@
 ## Overview
 V3 is a complete architectural redesign using a Finite State Machine (FSM) pattern with Pydantic's graph module. This approach simplifies the agentic systems by constraining operations to three primary states.
 
+## Final Project Deliverables (Dec 19)
+- [**1. Project Description**](docs/PROJECT_DESCRIPTION.md): Summary of AI features and functionality.
+- [**2. Class Diagram**](docs/CLASS_DIAGRAM.md): UML diagram of main backend classes.
+- [**3. Sequence Diagrams**](docs/SEQUENCE_DIAGRAMS.md): Visualizing New Deck and Modification flows.
+- [**4. Code Deployment Diagram**](docs/CODE_ORGANIZATION.md): Component diagram showing separation of concerns.
+
 ## Documentation
 - [**Getting Started**](docs/GETTING_STARTED.md): Installation and setup guide.
 - [**Backend Architecture**](docs/ARCHITECTURE_BACKEND.md): Deep dive into API, FSM, and Services.
