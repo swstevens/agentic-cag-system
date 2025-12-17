@@ -6,26 +6,26 @@ This diagram verifies the "Separation of Concerns" requirement.
 graph TB
     subgraph Frontend [Frontend Layer]
         direction TB
-        App[app.py<br/>(FastHTML Entry)]
-        Comps[components/<br/>(UI Widgets)]
-        Static[static/<br/>(CSS/Assets)]
+        App["app.py<br>(FastHTML Entry)"]
+        Comps["components/<br>(UI Widgets)"]
+        Static["static/<br>(CSS/Assets)"]
     end
 
     subgraph API [API Layer]
-        Router[api.py<br/>(FastAPI Router)]
-        Schemas[schemas/<br/>(Pydantic Models)]
+        Router["api.py<br>(FastAPI Router)"]
+        Schemas["schemas/<br>(Pydantic Models)"]
     end
 
     subgraph Core [Core Logic]
-        FSM[fsm/<br/>(State Machine)]
-        Services[services/<br/>(Business Logic)]
-        Agents[services/agents<br/>(LLM Integration)]
+        FSM["fsm/<br>(State Machine)"]
+        Services["services/<br>(Business Logic)"]
+        Agents["services/agents<br>(LLM Integration)"]
     end
 
     subgraph Data [Data Layer]
-        Repo[database/card_repository.py<br/>(CAG Pattern)]
-        DBService[database/database_service.py<br/>(SQL Ops)]
-        Vector[services/vector_service.py<br/>(Embeddings)]
+        Repo["database/card_repository.py<br>(CAG Pattern)"]
+        DBService["database/database_service.py<br>(SQL Ops)"]
+        Vector["services/vector_service.py<br>(Embeddings)"]
     end
 
     %% Dependencies
