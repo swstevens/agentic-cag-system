@@ -297,6 +297,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 logger.info(f"Deck built: {deck_dict.get('archetype')} - {deck_dict.get('total_cards')} cards")
                 quality_metrics = data["quality_metrics"]
 
+                # Add quality score to deck dict for frontend
+                deck_dict["quality_score"] = quality_metrics["overall_score"]
+
                 # Format response message
                 message_parts = [
                     f"✓ Successfully built a {deck_dict['archetype']} deck!",

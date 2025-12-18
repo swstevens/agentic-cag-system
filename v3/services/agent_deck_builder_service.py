@@ -137,7 +137,7 @@ class AgentDeckBuilderService:
         ) -> CardSearchResult:
             """
             Search for cards in the database.
-            
+
             Args:
                 semantic_query: Natural language query for semantic search (e.g., "fast goblin", "removal")
                 colors: Card colors (W, U, B, R, G)
@@ -147,6 +147,8 @@ class AgentDeckBuilderService:
                 text_query: Exact text to search in card name/text
                 limit: Maximum results to return
             """
+            logger.info(f"🔍 BUILD Agent search: query='{semantic_query}', colors={colors}, types={types}")
+
             filters = CardSearchFilters(
                 colors=colors,
                 cmc_min=cmc_min,
@@ -155,7 +157,7 @@ class AgentDeckBuilderService:
                 format_legal=self.current_request.format if self.current_request else None,
                 limit=limit
             )
-            
+
             if semantic_query:
                 cards = self.card_repo.semantic_search(semantic_query, filters, limit)
             else:
@@ -248,12 +250,15 @@ IMPORTANT:
 - You only need to select SPELL cards (creatures, instants, sorceries, etc.)
 - Lands will be added automatically ({land_count} lands based on {request.archetype} archetype)
 - Focus on building a spell suite that fits the format and archetype guidelines
+- LIMIT yourself to 3-5 broad searches MAX (e.g., "aggressive creatures", "removal spells", "card draw")
+- Each search returns 20 cards, so you have plenty of options from just a few searches
+- Do NOT make many narrow searches - make fewer, broader searches for efficiency
 
 Use the search_cards tool to find appropriate cards.
-- Use semantic_query for high-level concepts (e.g. "synergistic goblin cards", "cheap removal")
-- Use standard filters for specific constraints
+- Use semantic_query for high-level concepts (e.g. "aggressive creatures", "removal spells")
+- Avoid making many similar searches - one broad search is better than many narrow ones
 
-Build a focused, consistent spell suite with clear synergies.
+Build a focused, consistent spell suite with clear synergies using MINIMAL searches (3-5 maximum).
 """
 
         try:

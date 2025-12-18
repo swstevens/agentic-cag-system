@@ -20,6 +20,10 @@ from components.deck_library import deck_library_component
 # Load environment variables
 load_dotenv()
 
+# In-memory deck cache to avoid session cookie size limits (4KB max)
+# Maps session_id -> deck_data
+DECK_CACHE = {}
+
 # Initialize FastHTML app with sessions enabled
 app, rt = fast_app(
     hdrs=(
@@ -49,11 +53,14 @@ def serve_static(filepath: str):
 
 def render_content(session):
     """Render the main content area."""
-    has_deck = session.get("deck") is not None
+    deck = get_deck_from_cache(session)
+    has_deck = deck is not None
     deck_id = session.get("deck_id")
 
+    logger.info(f"render_content - deck_id: {deck_id}, has_deck: {has_deck}")
+
     return Div(
-        deck_list_component(session.get("deck")),
+        deck_list_component(deck),
         chat_component(session.get("messages"), has_deck=has_deck, deck_id=deck_id),
         Div(id="modal"),  # Modal container for save dialog
         cls="main-container",
@@ -61,10 +68,15 @@ def render_content(session):
     )
 
 
+def get_session_id(session):
+    """Get or create a unique session ID."""
+    if "sid" not in session:
+        session["sid"] = str(uuid.uuid4())
+    return session["sid"]
+
 def get_session_state(session):
     """Get or initialize session state."""
-    if "deck" not in session:
-        session["deck"] = None
+    get_session_id(session)  # Ensure session ID exists
     if "deck_id" not in session:
         session["deck_id"] = None
     if "messages" not in session:
@@ -72,6 +84,16 @@ def get_session_state(session):
     if "context" not in session:
         session["context"] = {}
     return session
+
+def get_deck_from_cache(session):
+    """Get deck from cache using session ID."""
+    sid = get_session_id(session)
+    return DECK_CACHE.get(sid)
+
+def set_deck_in_cache(session, deck_data):
+    """Store deck in cache using session ID."""
+    sid = get_session_id(session)
+    DECK_CACHE[sid] = deck_data
 
 
 @rt("/")
@@ -128,11 +150,12 @@ async def post(message: str, session):
 async def post(session):
     """
     Handle background chat processing (Heavy backend call).
-    
+
     Triggered by the 'Thinking' indicator loading.
     Returns the full updated content, replacing the temporary state.
     """
     get_session_state(session)
+    logger.info(f"/chat/process - Session ID at start: {id(session)}")
     
     # Get the last message which is the user's prompt
     if not session["messages"] or session["messages"][-1]["role"] != "user":
@@ -153,21 +176,33 @@ async def post(session):
                 {"card": {"id": str(uuid.uuid4()), "name": "Lightning Bolt", "types": ["Instant"], "type_line": "Instant", "mana_cost": "{R}", "cmc": 1}, "quantity": 2}
             ]
         }
-        session["deck"] = mock_deck
+        set_deck_in_cache(session, mock_deck)
         session["deck_id"] = None
         session["messages"].append({"role": "assistant", "content": "Debug: Loaded mock deck."})
         return render_content(session)
 
     try:
+        # Build request payload
+        payload = {
+            "message": message,
+            "context": session.get("context", {})
+        }
+
+        # If editing an existing deck, include it in the request
+        deck = get_deck_from_cache(session)
+        deck_id = session.get("deck_id")
+        logger.info(f"Chat process - deck exists: {deck is not None}, deck_id: {deck_id}")
+
+        if deck and deck_id:
+            payload["existing_deck"] = deck
+            logger.info(f"Sending modification request for deck {deck_id}")
+
         # Call backend API
         logger.info(f"Sending request to {BACKEND_URL}/api/chat for message: {message}")
         async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{BACKEND_URL}/api/chat",
-                json={
-                    "message": message,
-                    "context": session.get("context", {})
-                }
+                json=payload
             )
             response.raise_for_status()
             data = response.json()
@@ -178,13 +213,18 @@ async def post(session):
         
         # Update session with deck if provided
         if deck_data:
-            session["deck"] = deck_data
+            logger.info(f"Updating session with deck: {deck_data.get('format')} - {deck_data.get('total_cards')} cards")
+            set_deck_in_cache(session, deck_data)
+            # Preserve deck_id if we're editing an existing deck
+            # (deck_id is already set when loading a deck, so don't clear it)
             session["context"] = {
                 "format": deck_data.get("format"),
                 "colors": deck_data.get("colors", []),
                 "archetype": deck_data.get("archetype"),
             }
-        
+        else:
+            logger.warning("No deck data in backend response")
+
         # Add assistant message to history
         session["messages"].append({"role": "assistant", "content": assistant_message})
         
@@ -263,8 +303,8 @@ async def get(deck_id: str, session):
             response.raise_for_status()
             data = response.json()
 
-        # Load deck into session
-        session["deck"] = data["deck"]
+        # Load deck into cache
+        set_deck_in_cache(session, data["deck"])
         session["deck_id"] = deck_id
         session["messages"] = [
             {"role": "assistant", "content": f"Loaded deck: {data['name']}. You can now modify it by chatting with me!"}
@@ -312,22 +352,19 @@ async def get(deck_id: str, session):
 
 
 @rt("/save-deck-modal")
-def get(session):
+async def get(session):
     """Render the save deck modal."""
-    # logger.debug(f"save-deck-modal: Session keys: {list(session.keys())}")
-    # logger.debug(f"save-deck-modal: Has deck: {session.get('deck') is not None}")
-    if session.get("deck"):
-        pass
-        # logger.debug(f"save-deck-modal: Deck total cards: {session['deck'].get('total_cards', 0)}")
+    get_session_state(session)  # Ensure session is initialized
+    deck = get_deck_from_cache(session)
 
-    if not session.get("deck"):
+    if not deck:
         return Div(
             P("No deck to save!", cls="error-message"),
             id="modal"
         )
 
     # Calculate quality score from deck if available
-    quality_score = session.get("deck", {}).get("quality_score", 0.0)
+    quality_score = deck.get("quality_score", 0.0)
 
     modal_content = Div(
         Div(
@@ -395,7 +432,7 @@ async def post(name: str, description: str = "", session = None):
     """Save the current deck."""
     get_session_state(session)
 
-    deck = session.get("deck")
+    deck = get_deck_from_cache(session)
     if not deck:
         return Div(
             P("No deck to save!", cls="error-message"),
@@ -473,7 +510,7 @@ async def post(session):
     get_session_state(session)
 
     deck_id = session.get("deck_id")
-    deck = session.get("deck")
+    deck = get_deck_from_cache(session)
 
     if not deck_id or not deck:
         session["messages"].append(
