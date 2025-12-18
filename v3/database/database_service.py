@@ -20,13 +20,17 @@ class DatabaseService:
     transaction support for card operations.
     """
 
-    def __init__(self, db_path: str = "v3/data/cards.db"):
+    def __init__(self, db_path: str = None):
         """
         Initialize database service.
 
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file (defaults to v3/data/cards.db relative to this module)
         """
+        if db_path is None:
+            # Default to v3/data/cards.db relative to the v3 module directory
+            v3_dir = Path(__file__).parent.parent
+            db_path = str(v3_dir / "data" / "cards.db")
         self.db_path = db_path
         self._memory_conn = None  # Keep persistent connection for :memory: databases
         self._ensure_db_directory()

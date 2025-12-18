@@ -43,7 +43,8 @@ BACKEND_URL = "http://localhost:8000"
 @rt("/static/{filepath:path}")
 def serve_static(filepath: str):
     """Serve static files."""
-    return FileResponse(f"static/{filepath}")
+    static_dir = Path(__file__).parent / "static"
+    return FileResponse(static_dir / filepath)
 
 
 def render_content(session):

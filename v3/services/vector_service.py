@@ -6,6 +6,7 @@ to augment the standard attribute-based filtering.
 """
 
 import os
+from pathlib import Path
 import chromadb
 from chromadb.utils import embedding_functions
 from typing import List, Dict, Any, Optional
@@ -15,17 +16,21 @@ from ..caching import LRUCache
 class VectorService:
     """
     Service for managing vector embeddings and semantic search.
-    
+
     Uses ChromaDB to store and query card embeddings.
     """
-    
-    def __init__(self, persist_path: str = "v3/data/chroma_db"):
+
+    def __init__(self, persist_path: str = None):
         """
         Initialize vector service.
-        
+
         Args:
-            persist_path: Path to store ChromaDB data
+            persist_path: Path to store ChromaDB data (defaults to v3/data/chroma_db relative to this module)
         """
+        if persist_path is None:
+            # Default to v3/data/chroma_db relative to the v3 module directory
+            v3_dir = Path(__file__).parent.parent
+            persist_path = str(v3_dir / "data" / "chroma_db")
         self.client = chromadb.PersistentClient(path=persist_path)
         
         # Use OpenAI embeddings

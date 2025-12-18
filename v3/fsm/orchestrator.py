@@ -30,14 +30,14 @@ class FSMOrchestrator:
     def __init__(
         self,
         database_service: Optional[DatabaseService] = None,
-        db_path: str = "v3/data/cards.db"
+        db_path: Optional[str] = None
     ):
         """
         Initialize the FSM orchestrator.
-        
+
         Args:
             database_service: Optional database service instance
-            db_path: Path to database file (used if database_service not provided)
+            db_path: Path to database file (used if database_service not provided, defaults to v3/data/cards.db)
         """
         # Initialize database and services
         self.db_service = database_service or DatabaseService(db_path)
