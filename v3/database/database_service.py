@@ -15,45 +15,66 @@ from contextlib import contextmanager
 class DatabaseService:
     """
     SQLite3 database service for card storage and retrieval.
-    
+
     Manages database connection, schema, and provides
     transaction support for card operations.
     """
-    
+
     def __init__(self, db_path: str = "v3/data/cards.db"):
         """
         Initialize database service.
-        
+
         Args:
             db_path: Path to SQLite database file
         """
         self.db_path = db_path
+        self._memory_conn = None  # Keep persistent connection for :memory: databases
         self._ensure_db_directory()
         self._init_schema()
-    
+
     def _ensure_db_directory(self) -> None:
-        """Ensure database directory exists."""
+        """Ensure database directory exists (skip for in-memory databases)."""
+        if self.db_path == ":memory:":
+            return
         db_dir = Path(self.db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
-    
+
     @contextmanager
     def get_connection(self):
         """
         Context manager for database connections.
-        
+
+        For :memory: databases, reuses the same connection to persist data.
+        For file databases, creates a new connection each time.
+
         Yields:
             sqlite3.Connection: Database connection
         """
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # Enable column access by name
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        if self.db_path == ":memory:":
+            # Reuse the same connection for in-memory databases
+            if self._memory_conn is None:
+                self._memory_conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                self._memory_conn.row_factory = sqlite3.Row
+            conn = self._memory_conn
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            # Don't close the connection for :memory: databases
+        else:
+            # Create new connection for file databases
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
     
     def _init_schema(self) -> None:
         """Initialize database schema if not exists."""

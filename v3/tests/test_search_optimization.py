@@ -5,6 +5,7 @@ Quick test to verify database search and semantic search still work after optimi
 import asyncio
 import sys
 import os
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -13,6 +14,7 @@ from v3.services.vector_service import VectorService
 from v3.models.deck import CardSearchFilters
 
 
+@pytest.mark.asyncio
 async def test_basic_search():
     """Test basic database search with filters."""
     print("=" * 60)
@@ -51,6 +53,7 @@ async def test_basic_search():
     print()
 
 
+@pytest.mark.asyncio
 async def test_semantic_search():
     """Test semantic search if vector service is available."""
     print("=" * 60)
@@ -90,6 +93,7 @@ async def test_semantic_search():
         print()
 
 
+@pytest.mark.asyncio
 async def test_combined_search():
     """Test semantic search with hard filters."""
     print("=" * 60)

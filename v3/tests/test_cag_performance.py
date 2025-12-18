@@ -8,6 +8,7 @@ import asyncio
 import time
 import sys
 import os
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -15,6 +16,7 @@ from v3.database import DatabaseService, CardRepository
 from v3.caching import LRUCache
 
 
+@pytest.mark.asyncio
 async def test_without_cache():
     """Test card lookups without caching."""
     print("=" * 60)
@@ -44,6 +46,7 @@ async def test_without_cache():
     print()
 
 
+@pytest.mark.asyncio
 async def test_with_cache():
     """Test card lookups with LRU caching."""
     print("=" * 60)
@@ -84,6 +87,7 @@ async def test_with_cache():
     print()
 
 
+@pytest.mark.asyncio
 async def test_cache_warmup():
     """Test cache warmup with preloading."""
     print("=" * 60)

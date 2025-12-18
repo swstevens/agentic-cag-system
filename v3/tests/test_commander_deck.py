@@ -11,6 +11,7 @@ Tests the new format-aware deck building system, specifically:
 
 import asyncio
 import sys
+import pytest
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -23,6 +24,7 @@ from v3.services.agent_deck_builder_service import AgentDeckBuilderService
 from v3.services.quality_verifier_service import QualityVerifierService
 
 
+@pytest.mark.asyncio
 async def test_commander_deck_building():
     """
     Test building a Commander deck and verify format rules are applied.
@@ -206,6 +208,7 @@ async def test_commander_deck_building():
     return success
 
 
+@pytest.mark.asyncio
 async def test_format_comparison():
     """
     Compare format rules across different formats.

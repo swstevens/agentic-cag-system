@@ -68,12 +68,12 @@ class FormatRules:
             "singleton_rule": False,
             "legendary_max": 3,
         },
-        # Limited/Constructed Hybrid (Singleton - 100 cards like Commander but from recent sets)
+        # Standard Brawl (60-card format with Commander, not singleton)
         "Brawl": {
-            "deck_size_min": 100,
-            "deck_size_max": 100,
-            "copy_limit": 1,  # Singleton rule: 1 copy per card (except basic lands)
-            "singleton_rule": True,
+            "deck_size_min": 60,
+            "deck_size_max": 60,
+            "copy_limit": 4,  # Standard copy limit (changed from historic singleton)
+            "singleton_rule": False,  # Modern Brawl is NOT singleton
             "legendary_max": 1,  # Commander must be legendary creature or Planeswalker
         },
         # 100-card singleton format
@@ -119,10 +119,10 @@ class FormatRules:
             "6+": 0.10,
         },
         "Brawl": {
-            "0-1": 0.08,  # Similar to Commander - fewer low-cost spells
-            "2-3": 0.25,
-            "4-5": 0.30,
-            "6+": 0.27,   # More high-cost spells in 100-card singleton format
+            "0-1": 0.15,  # Similar to Standard - 60-card format
+            "2-3": 0.40,
+            "4-5": 0.25,
+            "6+": 0.10,   # 60-card format curve (not 100-card)
         },
         "Commander": {
             "0-1": 0.08,  # Lower early game density in Commander
@@ -139,7 +139,7 @@ class FormatRules:
         "Pioneer": 0.40,
         "Legacy": 0.40,
         "Vintage": 0.40,
-        "Brawl": 0.37,     # ~37 lands in 100-card singleton deck (like Commander)
+        "Brawl": 0.40,     # ~24 lands in 60-card deck (like Standard)
         "Commander": 0.37,  # ~37 lands in 100-card deck
     }
 
@@ -176,10 +176,10 @@ class FormatRules:
             "Combo": 23,
         },
         "Brawl": {
-            "Aggro": 35,     # 100-card singleton format
-            "Midrange": 36,
-            "Control": 38,
-            "Combo": 35,
+            "Aggro": 22,     # 60-card format (like Standard)
+            "Midrange": 24,
+            "Control": 26,
+            "Combo": 23,
         },
         "Commander": {
             "Aggro": 35,

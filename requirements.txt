@@ -1,5 +1,6 @@
 pydantic>=2.0.0
 pydantic-graph>=0.1.0
+pydantic-ai>=0.0.14
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-fasthtml>=0.1.0
@@ -9,3 +10,5 @@ itsdangerous>=2.1.2
 python-dotenv>=1.0.0
 chromadb>=0.4.0
 openai>=1.0.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
