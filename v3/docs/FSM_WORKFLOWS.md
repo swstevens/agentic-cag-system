@@ -332,4 +332,134 @@ sequenceDiagram
 
 ---
 
+## Detailed Sequence Diagrams
+
+### 1. New Deck Creation Workflow
+
+This diagram illustrates the complete end-to-end flow from user request through the Draft-Verify-Refine loop.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Frontend as FastHTML App
+    participant API as FastAPI Backend
+    participant FSM as FSM Orchestrator
+    participant Builder as Agent Builder
+    participant Verifier as Quality Verifier
+
+    User->>Frontend: "Build a standard zombies deck"
+    Frontend->>API: POST /api/chat
+    API->>FSM: execute(request)
+
+    FSM->>FSM: Parse Request
+
+    loop Draft-Verify-Refine
+        FSM->>Builder: build_initial_deck()
+        Builder-->>FSM: Draft Deck (60 cards)
+
+        FSM->>Verifier: verify_quality()
+        Verifier-->>FSM: Score: 0.65 (Fail)
+
+        FSM->>Builder: refine_deck(suggestions)
+        Builder-->>FSM: Updated Deck
+
+        FSM->>Verifier: verify_quality()
+        Verifier-->>FSM: Score: 0.82 (Pass)
+    end
+
+    FSM-->>API: Final Deck + Explanation
+    API-->>Frontend: JSON Response
+    Frontend-->>User: Display Deck Visualizer
+```
+
+### 2. Deck Modification Workflow
+
+This diagram shows a user modifying an existing deck via the chat interface.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Frontend
+    participant API
+    participant FSM
+    participant Agent
+    participant DB as Database
+
+    User->>Frontend: "Swap Lightning Bolt for Shock"
+    note right of User: Deck is currently loaded in session
+
+    Frontend->>API: POST /api/modify-deck
+    API->>FSM: execute_modification(deck, prompt)
+
+    FSM->>Agent: refine_deck(deck, prompt)
+
+    Agent->>DB: search_cards("Shock")
+    DB-->>Agent: Card Data
+
+    Agent->>Agent: Logic: Remove 4x Bolt, Add 4x Shock
+    Agent-->>FSM: Modified Deck Object
+
+    FSM-->>API: Result
+    API-->>Frontend: Updated Deck
+    Frontend-->>User: Update UI OOB Swap
+```
+
+### 3. Complete New Deck Workflow with Service Layer
+
+Detailed sequence showing interactions with all services:
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant API
+    participant FSM
+    participant Builder as AgentBuilder
+    participant Verifier as QualityVerifier
+
+    User->>API: "Build a Commander Dinosaur Deck"
+    API->>FSM: Execute(Request)
+
+    FSM->>FSM: ParseRequestNode
+
+    rect rgb(200, 255, 200)
+    note right of FSM: Build Phase
+    FSM->>Builder: BuildInitialDeck
+    Builder-->>FSM: Draft Deck (100 cards)
+    end
+
+    rect rgb(255, 255, 200)
+    note right of FSM: Verify Phase
+    FSM->>Verifier: VerifyQuality(Deck)
+    Verifier-->>FSM: Score: 0.6 (Fail)
+    end
+
+    loop Refine until Score >= 0.7
+        FSM->>Builder: RefineDeck(Improvements)
+        Builder-->>FSM: Updated Deck
+        FSM->>Verifier: VerifyQuality
+        Verifier-->>FSM: Score: 0.75 (Pass)
+    end
+
+    FSM->>API: Return Final Deck
+    API->>User: Display Deck & Explanation
+```
+
+## Tool Calling Workflow (Agent)
+
+The `AgentDeckBuilderService` uses an LLM agent with tools for intelligent card selection.
+
+**System Prompt:** "You are a specialized MTG deck builder..."
+
+**Available Tools:**
+- `search_cards(name, type, color)`: Finds candidate cards
+- `get_card_details(id)`: Gets full Oracle text
+
+**Process Flow:**
+1. Agent receives "Build Dinosaurs"
+2. Agent calls `search_cards(type="Dinosaur", color=["R","G"])`
+3. System returns list of card names/stats
+4. Agent selects best ones and returns JSON deck list
+
+---
+
 Ready to implement? The architecture keeps the two flows cleanly separated while sharing core services.

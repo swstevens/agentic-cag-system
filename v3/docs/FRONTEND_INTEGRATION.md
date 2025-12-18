@@ -1,8 +1,10 @@
-# Deck Persistence API Documentation
+# Frontend Integration Guide
 
 ## Overview
 
-The v3 API now includes full CRUD (Create, Read, Update, Delete) support for deck persistence. This allows users to save, load, edit, and manage their deck collections.
+This guide provides frontend developers with complete examples for integrating with the v3 deck persistence API. The backend provides full CRUD (Create, Read, Update, Delete) support for deck persistence, allowing users to save, load, edit, and manage their deck collections.
+
+For backend implementation details, see [BACKEND_API.md](BACKEND_API.md).
 
 ## Base URL
 
