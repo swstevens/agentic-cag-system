@@ -165,18 +165,33 @@ def create_sample_cards(db_service: DatabaseService) -> int:
 
 def main():
     """Main import function."""
+    import sys
+
     db_service = DatabaseService()
-    
-    # Check if v2 data exists
-    v2_json_path = 'v2/data/AtomicCards.json'
-    
-    if os.path.exists(v2_json_path):
-        print("Found v2 data, importing...")
-        count = import_from_v2_json(v2_json_path, db_service)
+
+    # Check for command-line argument
+    if len(sys.argv) > 1:
+        json_path = sys.argv[1]
+        if os.path.exists(json_path):
+            print(f"Importing from {json_path}...")
+            count = import_from_v2_json(json_path, db_service)
+        else:
+            print(f"Error: File not found: {json_path}")
+            sys.exit(1)
     else:
-        print("No v2 data found, creating sample cards for testing...")
-        count = create_sample_cards(db_service)
-    
+        # Check default location
+        default_path = 'v3/data/AtomicCards.json'
+        if os.path.exists(default_path):
+            print(f"Found AtomicCards.json in v3/data/, importing...")
+            count = import_from_v2_json(default_path, db_service)
+        else:
+            print("No AtomicCards.json found. Please provide path as argument:")
+            print("  python scripts/import_cards.py /path/to/AtomicCards.json")
+            print("\nOr download from: https://mtgjson.com/downloads/all-files/#atomiccards")
+            print(f"  and save to: {os.path.abspath(default_path)}")
+            print("\nCreating sample cards for testing instead...")
+            count = create_sample_cards(db_service)
+
     # Display stats
     total_cards = db_service.get_card_count()
     print(f"\nDatabase now contains {total_cards} cards")
