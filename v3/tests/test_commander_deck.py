@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from v3.models.deck import DeckBuildRequest, Deck, DeckCard
 from v3.models.format_rules import FormatRules
 from v3.database.database_service import DatabaseService
+from v3.database.card_repository import CardRepository
 from v3.services.agent_deck_builder_service import AgentDeckBuilderService
 from v3.services.quality_verifier_service import QualityVerifierService
 
@@ -36,7 +37,7 @@ async def test_commander_deck_building():
     # Initialize services
     print("\n[1] Initializing database and services...")
     db_service = DatabaseService()
-    card_repo = db_service.card_repository
+    card_repo = CardRepository(db_service)
     deck_builder = AgentDeckBuilderService(card_repo)
     quality_verifier = QualityVerifierService()
 
