@@ -5,7 +5,7 @@ Reuses card models from v2 and adds new models for
 deck building, quality metrics, and iteration tracking.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -53,8 +53,7 @@ class MTGCard(BaseModel):
     legalities: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # New V3 Models

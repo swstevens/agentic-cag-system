@@ -39,7 +39,7 @@ class VectorService:
             print("Warning: OPENAI_API_KEY not found. Vector service may not work.")
 
         self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-            api_key=api_key,
+            api_key_env_var="OPENAI_API_KEY",
             model_name="text-embedding-3-small"
         )
         

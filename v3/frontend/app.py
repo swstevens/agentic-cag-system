@@ -167,10 +167,18 @@ async def post(session):
     # DEBUG: Test command
     if message == "!test_deck":
         logger.info("Executing !test_deck command")
+        mock_notes = (
+            "### Suggestions for further iteration:\n"
+            "- Add 4x Fervent Champion: A low-cost aggressive creature with first strike and haste.\n"
+            "- Add 2x Bonecrusher Giant: Provides removal and functions as a creature.\n"
+            "- Remove 2x Cactuar: Lacks synergy and impact compared to other options."
+        )
         mock_deck = {
             "format": "Standard",
             "archetype": "Red Deck Wins",
             "total_cards": 4,
+            "quality_score": 0.85,
+            "improvement_notes": mock_notes,
             "cards": [
                 {"card": {"id": str(uuid.uuid4()), "name": "Mountain", "types": ["Land"], "type_line": "Basic Land — Mountain", "mana_cost": ""}, "quantity": 2},
                 {"card": {"id": str(uuid.uuid4()), "name": "Lightning Bolt", "types": ["Instant"], "type_line": "Instant", "mana_cost": "{R}", "cmc": 1}, "quantity": 2}
@@ -178,7 +186,15 @@ async def post(session):
         }
         set_deck_in_cache(session, mock_deck)
         session["deck_id"] = None
-        session["messages"].append({"role": "assistant", "content": "Debug: Loaded mock deck."})
+        assistant_message = (
+            "I've built a **Standard Red Deck Wins** deck for you!\n\n"
+            "**Quality Score: 0.85**\n\n"
+            "### Improvements Applied:\n"
+            "- Optimized mana base\n"
+            "- Balanced creature count\n\n"
+            f"{mock_notes}"
+        )
+        session["messages"].append({"role": "assistant", "content": assistant_message})
         return render_content(session)
 
     try:
@@ -210,10 +226,16 @@ async def post(session):
         # Extract response
         assistant_message = data.get("message", "No response")
         deck_data = data.get("deck")
+        improvement_notes = data.get("improvement_notes")
         
         # Update session with deck if provided
         if deck_data:
             logger.info(f"Updating session with deck: {deck_data.get('format')} - {deck_data.get('total_cards')} cards")
+            
+            # Store improvement notes in deck data for later saving
+            if improvement_notes:
+                deck_data["improvement_notes"] = improvement_notes
+                
             set_deck_in_cache(session, deck_data)
             # Preserve deck_id if we're editing an existing deck
             # (deck_id is already set when loading a deck, so don't clear it)
@@ -304,10 +326,20 @@ async def get(deck_id: str, session):
             data = response.json()
 
         # Load deck into cache
-        set_deck_in_cache(session, data["deck"])
+        deck_data = data["deck"]
+        if data.get("improvement_notes"):
+            deck_data["improvement_notes"] = data["improvement_notes"]
+            
+        set_deck_in_cache(session, deck_data)
         session["deck_id"] = deck_id
+        
+        # Format initial message with improvement notes if present
+        content = f"### Loaded deck: {data['name']}\nYou can now modify it by chatting with me!"
+        if data.get("improvement_notes"):
+            content += f"\n\n{data['improvement_notes']}"
+            
         session["messages"] = [
-            {"role": "assistant", "content": f"Loaded deck: {data['name']}. You can now modify it by chatting with me!"}
+            {"role": "assistant", "content": content}
         ]
         session["context"] = {
             "format": data["format"],
@@ -463,7 +495,8 @@ async def post(name: str, description: str = "", session = None):
                     "deck": deck,
                     "name": name,
                     "description": description,
-                    "quality_score": quality_score
+                    "quality_score": quality_score,
+                    "improvement_notes": deck.get("improvement_notes")
                 }
             )
             response.raise_for_status()
@@ -523,7 +556,10 @@ async def post(session):
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.put(
                 f"{BACKEND_URL}/api/decks/{deck_id}",
-                json={"deck": deck}
+                json={
+                    "deck": deck,
+                    "improvement_notes": deck.get("improvement_notes")
+                }
             )
             response.raise_for_status()
             data = response.json()

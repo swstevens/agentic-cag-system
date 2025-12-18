@@ -63,7 +63,8 @@ def test_save_deck(deck_repo, sample_deck):
         deck=sample_deck,
         name="Test Deck",
         description="A test deck",
-        quality_score=0.85
+        quality_score=0.85,
+        improvement_notes="- Add more lands\n- Remove weak creatures"
     )
 
     assert deck_id is not None
@@ -78,7 +79,8 @@ def test_get_deck_by_id(deck_repo, sample_deck):
         deck=sample_deck,
         name="Test Deck",
         description="A test deck",
-        quality_score=0.85
+        quality_score=0.85,
+        improvement_notes="- Add more lands\n- Remove weak creatures"
     )
 
     # Retrieve it
@@ -90,6 +92,7 @@ def test_get_deck_by_id(deck_repo, sample_deck):
     assert deck_data['format'] == "Standard"
     assert deck_data['archetype'] == "Aggro"
     assert deck_data['quality_score'] == 0.85
+    assert deck_data['improvement_notes'] == "- Add more lands\n- Remove weak creatures"
     assert deck_data['total_cards'] == 24
     assert deck_data['deck'] is not None
 
@@ -189,7 +192,8 @@ def test_update_deck(deck_repo, sample_deck):
         deck_id=deck_id,
         deck=sample_deck,
         name="Updated Name",
-        quality_score=0.9
+        quality_score=0.9,
+        improvement_notes="Updated notes"
     )
 
     assert updated is True
@@ -199,6 +203,7 @@ def test_update_deck(deck_repo, sample_deck):
     assert deck_data['name'] == "Updated Name"
     assert deck_data['archetype'] == "Midrange"
     assert deck_data['quality_score'] == 0.9
+    assert deck_data['improvement_notes'] == "Updated notes"
 
 
 def test_update_nonexistent_deck(deck_repo, sample_deck):

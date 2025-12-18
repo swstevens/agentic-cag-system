@@ -120,11 +120,19 @@ class DatabaseService:
                     deck_data TEXT NOT NULL,
                     quality_score REAL,
                     total_cards INTEGER,
+                    improvement_notes TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     user_id TEXT
                 )
             """)
+
+            # Migration: Add improvement_notes column if it doesn't exist
+            try:
+                cursor.execute("ALTER TABLE decks ADD COLUMN improvement_notes TEXT")
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
 
             # Create indexes for common queries
             cursor.execute("""

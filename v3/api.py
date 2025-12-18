@@ -35,13 +35,12 @@ class ChatRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
     existing_deck: Optional[Dict[str, Any]] = None  # If provided, this is a modification request
 
-
 class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     message: str
     deck: Optional[Dict[str, Any]] = None
+    improvement_notes: Optional[str] = None
     error: Optional[str] = None
-
 
 class SaveDeckRequest(BaseModel):
     """Request model for saving a deck."""
@@ -49,6 +48,7 @@ class SaveDeckRequest(BaseModel):
     name: str
     description: Optional[str] = None
     quality_score: Optional[float] = None
+    improvement_notes: Optional[str] = None
 
 
 class SaveDeckResponse(BaseModel):
@@ -69,6 +69,7 @@ class DeckListItem(BaseModel):
     colors: List[str]
     total_cards: int
     quality_score: Optional[float] = None
+    improvement_notes: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -80,13 +81,13 @@ class DeckListResponse(BaseModel):
     total: int
     error: Optional[str] = None
 
-
 class UpdateDeckRequest(BaseModel):
     """Request model for updating a deck."""
     deck: Dict[str, Any]
     name: Optional[str] = None
     description: Optional[str] = None
     quality_score: Optional[float] = None
+    improvement_notes: Optional[str] = None
 
 
 class UpdateDeckResponse(BaseModel):
@@ -299,6 +300,12 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
                 # Add quality score to deck dict for frontend
                 deck_dict["quality_score"] = quality_metrics["overall_score"]
+                
+                # Extract improvement notes from suggestions
+                improvement_notes = None
+                if quality_metrics.get("suggestions"):
+                    improvement_notes = "\n".join([f"- {s}" for s in quality_metrics["suggestions"]])
+                
 
                 # Format response message
                 message_parts = [
@@ -320,10 +327,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
                         message_parts.append(f"  - {suggestion}")
 
                 response_message = "\n".join(message_parts)
-
                 return ChatResponse(
                     message=response_message,
                     deck=deck_dict,
+                    improvement_notes=improvement_notes,
                     error=None
                 )
             else:
@@ -364,7 +371,8 @@ async def save_deck(request: SaveDeckRequest) -> SaveDeckResponse:
             deck=deck,
             name=request.name,
             description=request.description,
-            quality_score=request.quality_score
+            quality_score=request.quality_score,
+            improvement_notes=request.improvement_notes
         )
 
         return SaveDeckResponse(
@@ -430,6 +438,7 @@ async def list_decks(
                 colors=deck.get('colors', []),
                 total_cards=deck.get('total_cards', 0),
                 quality_score=deck.get('quality_score'),
+                improvement_notes=deck.get('improvement_notes'),
                 created_at=deck.get('created_at', ''),
                 updated_at=deck.get('updated_at', '')
             )
@@ -481,6 +490,7 @@ async def get_deck(deck_id: str) -> Dict[str, Any]:
             "colors": deck_data.get('colors', []),
             "total_cards": deck_data.get('total_cards', 0),
             "quality_score": deck_data.get('quality_score'),
+            "improvement_notes": deck_data.get('improvement_notes'),
             "deck": deck_data.get('deck'),
             "created_at": deck_data.get('created_at'),
             "updated_at": deck_data.get('updated_at'),
@@ -516,7 +526,8 @@ async def update_deck(deck_id: str, request: UpdateDeckRequest) -> UpdateDeckRes
             deck=deck,
             name=request.name,
             description=request.description,
-            quality_score=request.quality_score
+            quality_score=request.quality_score,
+            improvement_notes=request.improvement_notes
         )
 
         if not updated:

@@ -34,6 +34,7 @@ class DeckRepository:
         name: str,
         description: Optional[str] = None,
         quality_score: Optional[float] = None,
+        improvement_notes: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> str:
         """
@@ -61,8 +62,8 @@ class DeckRepository:
             cursor.execute("""
                 INSERT INTO decks (
                     id, name, description, format, archetype, colors,
-                    deck_data, quality_score, total_cards, user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    deck_data, quality_score, total_cards, improvement_notes, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 deck_id,
                 name,
@@ -73,6 +74,7 @@ class DeckRepository:
                 deck_data,
                 quality_score,
                 deck.total_cards,
+                improvement_notes,
                 user_id
             ))
 
@@ -154,7 +156,8 @@ class DeckRepository:
         deck: Deck,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        quality_score: Optional[float] = None
+        quality_score: Optional[float] = None,
+        improvement_notes: Optional[str] = None
     ) -> bool:
         """
         Update an existing deck.
@@ -207,6 +210,10 @@ class DeckRepository:
             if quality_score is not None:
                 update_fields.append("quality_score = ?")
                 params.append(quality_score)
+
+            if improvement_notes is not None:
+                update_fields.append("improvement_notes = ?")
+                params.append(improvement_notes)
 
             params.append(deck_id)
 
