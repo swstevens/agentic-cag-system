@@ -32,7 +32,8 @@ http://localhost:8000
   },
   "name": "Red-Green Aggro",
   "description": "Fast aggressive deck with efficient creatures",
-  "quality_score": 0.85
+  "quality_score": 0.85,
+  "improvement_notes": "### Suggestions: ..."
 }
 ```
 
@@ -104,6 +105,7 @@ GET /api/decks?format=Standard&limit=20
       "colors": ["R", "G"],
       "total_cards": 60,
       "quality_score": 0.85,
+      "improvement_notes": "...",
       "created_at": "2025-01-15T10:30:00",
       "updated_at": "2025-01-15T10:30:00"
     },
@@ -169,6 +171,7 @@ GET /api/decks/550e8400-e29b-41d4-a716-446655440000
   "colors": ["R", "G"],
   "total_cards": 60,
   "quality_score": 0.85,
+  "improvement_notes": "...",
   "deck": {
     "cards": [
       {
@@ -229,7 +232,8 @@ async function loadDeck(deckId) {
   },
   "name": "Updated Red-Green Aggro",
   "description": "Improved aggressive strategy",
-  "quality_score": 0.90
+  "quality_score": 0.90,
+  "improvement_notes": "..."
 }
 ```
 
@@ -392,6 +396,7 @@ CREATE TABLE decks (
     colors TEXT,                      -- JSON array: ["R", "G"]
     deck_data TEXT NOT NULL,          -- Full JSON-serialized Deck object
     quality_score REAL,               -- 0.0 to 1.0
+    improvement_notes TEXT,           -- AI-generated suggestions
     total_cards INTEGER,              -- Deck size
     created_at TIMESTAMP,             -- Auto-generated
     updated_at TIMESTAMP,             -- Auto-updated

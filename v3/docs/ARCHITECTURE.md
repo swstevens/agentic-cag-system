@@ -53,7 +53,7 @@ stateDiagram-v2
 
 - **`CardRepository`**: Implements the **CAG (Cache-Augmented Generation)** pattern. It checks a local LRU cache first, then the SQLite database.
 - **`DatabaseService`**: Handles raw SQL interactions with `cards.db`.
-- **`DeckRepository`**: Manages deck persistence with full CRUD operations.
+- **`DeckRepository`**: Manages deck persistence with full CRUD operations, including archiving AI-generated `improvement_notes` for later reference.
 
 ### Backend Component Diagram
 

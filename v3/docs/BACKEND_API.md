@@ -50,6 +50,7 @@ class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     message: str
     deck: Optional[Dict[str, Any]] = None
+    improvement_notes: Optional[str] = None
     error: Optional[str] = None
 ```
 
@@ -64,6 +65,7 @@ class SaveDeckRequest(BaseModel):
     name: str
     description: Optional[str] = None
     quality_score: Optional[float] = None
+    improvement_notes: Optional[str] = None
 
 class SaveDeckResponse(BaseModel):
     """Response model for saving a deck."""
@@ -82,6 +84,7 @@ class DeckListItem(BaseModel):
     colors: List[str]
     total_cards: int
     quality_score: Optional[float] = None
+    improvement_notes: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -98,6 +101,7 @@ class UpdateDeckRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     quality_score: Optional[float] = None
+    improvement_notes: Optional[str] = None
 
 class UpdateDeckResponse(BaseModel):
     """Response model for updating a deck."""
@@ -612,7 +616,8 @@ deck_id = deck_repository.save_deck(
     deck=deck,  # Deck model instance
     name="My Aggro Deck",
     description="Fast aggressive deck",
-    quality_score=0.85
+    quality_score=0.85,
+    improvement_notes="..."
 )
 
 # List decks
@@ -631,7 +636,8 @@ success = deck_repository.update_deck(
     deck_id=deck_id,
     deck=updated_deck,
     name="Updated Name",
-    quality_score=0.90
+    quality_score=0.90,
+    improvement_notes="..."
 )
 
 # Delete deck
